@@ -26,176 +26,228 @@ RobotStateMachine::RobotStateMachine(L298NMotor* left, L298NMotor* right, LineSe
     
     _turnStartTime = 0;
     _junctionForwardTime = 0;
+    
+    // Initialize output variables
+    _leftSpeedNew = 0;
+    _rightSpeedNew = 0;
 }
 
 // ============================================================================
-// STATE MACHINE UPDATE
+// STATE MACHINE UPDATE - MAIN LOOP
 // ============================================================================
 
 void RobotStateMachine::update()
 {
+    // Read sensors
     _lineSensor->read();
     
-    switch (_currentState) {
-        case STATE_IDLE:
-            handleIdleState();
-            break;
-        case STATE_LINE_FOLLOW:
-            handleLineFollowState();
-            break;
-        case STATE_JUNCTION_FORWARD:
-            handleJunctionForwardState();
-            break;
-        case STATE_TURN_LEFT:
-            handleTurnLeftState();
-            break;
-        case STATE_TURN_RIGHT:
-            handleTurnRightState();
-            break;
-        case STATE_TURN_AROUND:
-            handleTurnAroundState();
-            break;
-        case STATE_OBSTACLE_AVOID:
-            handleObstacleAvoidState();
-            break;
-        case STATE_MAZE_SOLVE:
-            handleMazeSolveState();
-            break;
-        case STATE_LOST:
-            handleLostState();
-            break;
-    }
+    // ========================================================================
+    // STATE TRANSITIONS
+    // ========================================================================
+    updateStateTransitions();
+    
+    // ========================================================================
+    // UPDATE OUTPUTS 
+    // ========================================================================
+    updateOutputs();
+    
+    // ========================================================================
+    // APPLY OUTPUTS
+    // ========================================================================
+    applyOutputs();
 }
 
 // ============================================================================
-// STATE HANDLERS
+// PART 1: STATE TRANSITIONS
 // ============================================================================
 
-void RobotStateMachine::handleIdleState()
-{
-    stop();
-}
-
-void RobotStateMachine::handleLineFollowState()
+void RobotStateMachine::updateStateTransitions()
 {
     JunctionType junction = _lineSensor->detectJunction();
     
-    if (junction != JUNCTION_NONE && junction != JUNCTION_LOST) {
-        if (_currentMode == MODE_MAZE_SOLVE) {
-            _currentState = STATE_JUNCTION_FORWARD;
-            _junctionForwardTime = millis();
-            return;
-        }
-    }
-    
-    if (junction == JUNCTION_LOST) {
-        _currentState = STATE_LOST;
-        return;
-    }
-    
-    followLine();
-}
-
-void RobotStateMachine::handleJunctionForwardState()
-{
-    _leftMotor->setSpeed(_baseSpeed);
-    _rightMotor->setSpeed(_baseSpeed);
-    
-    if (millis() - _junctionForwardTime > JUNCTION_FWD_MS) {
-        JunctionType junction = _lineSensor->detectJunction();
-        
-        if (junction == JUNCTION_LEFT || junction == JUNCTION_T) {
-            _currentState = STATE_TURN_LEFT;
-            _turnStartTime = millis();
-        }
-        else if (junction == JUNCTION_RIGHT) {
-            _currentState = STATE_TURN_RIGHT;
-            _turnStartTime = millis();
-        }
-        else if (junction == JUNCTION_CROSS) {
+    switch (_currentState) 
+    {
+        case STATE_IDLE:
+            // No automatic transitions - controlled by start() command
+            break;
+            
+        case STATE_LINE_FOLLOW:
+            // Check for junction (only in MAZE mode)
+            if (junction != JUNCTION_NONE && junction != JUNCTION_LOST) {
+                if (_currentMode == MODE_MAZE_SOLVE) {
+                    _currentState = STATE_JUNCTION_FORWARD;
+                    _junctionForwardTime = millis();
+                }
+            }
+            
+            // Check for lost line
+            if (junction == JUNCTION_LOST) {
+                _currentState = STATE_LOST;
+            }
+            break;
+            
+        case STATE_JUNCTION_FORWARD:
+            // Wait for forward movement to complete
+            if (millis() - _junctionForwardTime > JUNCTION_FWD_MS) {
+                junction = _lineSensor->detectJunction();
+                
+                if (junction == JUNCTION_LEFT || junction == JUNCTION_T) {
+                    _currentState = STATE_TURN_LEFT;
+                    _turnStartTime = millis();
+                }
+                else if (junction == JUNCTION_RIGHT) {
+                    _currentState = STATE_TURN_RIGHT;
+                    _turnStartTime = millis();
+                }
+                else if (junction == JUNCTION_CROSS) {
+                    _currentState = STATE_LINE_FOLLOW;
+                }
+                else {
+                    _currentState = STATE_LINE_FOLLOW;
+                }
+            }
+            break;
+            
+        case STATE_TURN_LEFT:
+            // Check if turn time completed
+            if (millis() - _turnStartTime > LEFT_TURN_90_TIME_MS) {
+                _currentState = STATE_LINE_FOLLOW;
+            }
+            break;
+            
+        case STATE_TURN_RIGHT:
+            // Check if turn time completed
+            if (millis() - _turnStartTime > RIGHT_TURN_90_TIME_MS) {
+                _currentState = STATE_LINE_FOLLOW;
+            }
+            break;
+            
+        case STATE_TURN_AROUND:
+            // Check if U-turn time completed
+            if (millis() - _turnStartTime > TURN_180_TIME_MS) {
+                _currentState = STATE_LINE_FOLLOW;
+            }
+            break;
+            
+        case STATE_OBSTACLE_AVOID:
+            // Simple timeout transition
+            if (millis() - _turnStartTime > 1000) {
+                _currentState = STATE_LINE_FOLLOW;
+            }
+            break;
+            
+        case STATE_MAZE_SOLVE:
+            // Redirect to line follow
             _currentState = STATE_LINE_FOLLOW;
-        }
-        else {
-            _currentState = STATE_LINE_FOLLOW;
-        }
+            break;
+            
+        case STATE_LOST:
+            // After stopping briefly, start searching
+            if (millis() - _turnStartTime > 500) {
+                _currentState = STATE_TURN_RIGHT;
+                _turnStartTime = millis();
+            }
+            break;
     }
-}
-
-void RobotStateMachine::handleTurnLeftState()
-{
-    _leftMotor->setSpeed(0);
-    _rightMotor->setSpeed(TURN_SPEED);
-    
-    if (millis() - _turnStartTime > TURN_90_TIME_MS) {
-        _currentState = STATE_LINE_FOLLOW;
-    }
-}
-
-void RobotStateMachine::handleTurnRightState()
-{
-    _leftMotor->setSpeed(TURN_SPEED);
-    _rightMotor->setSpeed(0);
-    
-    if (millis() - _turnStartTime > TURN_90_TIME_MS) {
-        _currentState = STATE_LINE_FOLLOW;
-    }
-}
-
-void RobotStateMachine::handleTurnAroundState()
-{
-    _leftMotor->setSpeed(TURN_SPEED);
-    _rightMotor->setSpeed(-TURN_SPEED);
-    
-    if (millis() - _turnStartTime > TURN_180_TIME_MS) {
-        _currentState = STATE_LINE_FOLLOW;
-    }
-}
-
-void RobotStateMachine::handleObstacleAvoidState()
-{
-    stop();
-    delay(1000);
-    _currentState = STATE_LINE_FOLLOW;
-}
-
-void RobotStateMachine::handleMazeSolveState()
-{
-    _currentState = STATE_LINE_FOLLOW;
-}
-
-void RobotStateMachine::handleLostState()
-{
-    stop();
-    delay(500);
-    _currentState = STATE_TURN_RIGHT;
-    _turnStartTime = millis();
 }
 
 // ============================================================================
-// PID LINE FOLLOWING
+// UPDATE OUTPUTS
 // ============================================================================
 
-void RobotStateMachine::followLine()
+void RobotStateMachine::updateOutputs()
+{
+    switch (_currentState)
+    {
+        case STATE_IDLE:
+            _leftSpeedNew = 0;
+            _rightSpeedNew = 0;
+            break;
+            
+        case STATE_LINE_FOLLOW:
+            calculatePIDSpeeds();
+            break;
+            
+        case STATE_JUNCTION_FORWARD:
+            _leftSpeedNew = _baseSpeed;
+            _rightSpeedNew = _baseSpeed;
+            break;
+            
+        case STATE_TURN_LEFT:
+            _leftSpeedNew = 0;
+            _rightSpeedNew = TURN_SPEED;
+            break;
+            
+        case STATE_TURN_RIGHT:
+            _leftSpeedNew = TURN_SPEED;
+            _rightSpeedNew = 0;
+            break;
+            
+        case STATE_TURN_AROUND:
+            _leftSpeedNew = TURN_SPEED;
+            _rightSpeedNew = -TURN_SPEED;
+            break;
+            
+        case STATE_OBSTACLE_AVOID:
+            _leftSpeedNew = 0;
+            _rightSpeedNew = 0;
+            break;
+            
+        case STATE_MAZE_SOLVE:
+            // Should not reach here due to transition
+            _leftSpeedNew = 0;
+            _rightSpeedNew = 0;
+            break;
+            
+        case STATE_LOST:
+            // Stop during lost state
+            _leftSpeedNew = 0;
+            _rightSpeedNew = 0;
+            // Set timer for search
+            if (_turnStartTime == 0) {
+                _turnStartTime = millis();
+            }
+            break;
+    }
+}
+
+// ============================================================================
+// APPLY OUTPUTS
+// ============================================================================
+
+void RobotStateMachine::applyOutputs()
+{
+    _leftMotor->setSpeed(_leftSpeedNew);
+    _rightMotor->setSpeed(_rightSpeedNew);
+}
+
+// ============================================================================
+// PID CALCULATION (Helper for LINE_FOLLOW state)
+// ============================================================================
+
+void RobotStateMachine::calculatePIDSpeeds()
 {
     int position = _lineSensor->getPosition();
     int error = position;
     
+    // Integral with anti-windup
     _integral += error;
     _integral = constrain(_integral, -10000, 10000);
     
+    // Derivative
     int derivative = error - _lastError;
     _lastError = error;
     
+    // PID formula
     float correction = _kp * error + _ki * _integral + _kd * derivative;
     
+    // Apply correction to base speed
     int leftSpeed = _baseSpeed - correction;
     int rightSpeed = _baseSpeed + correction;
     
-    leftSpeed = constrain(leftSpeed, -_maxSpeed, _maxSpeed);
-    rightSpeed = constrain(rightSpeed, -_maxSpeed, _maxSpeed);
-    
-    _leftMotor->setSpeed(leftSpeed);
-    _rightMotor->setSpeed(rightSpeed);
+    // Constrain to valid range
+    _leftSpeedNew = constrain(leftSpeed, -_maxSpeed, _maxSpeed);
+    _rightSpeedNew = constrain(rightSpeed, -_maxSpeed, _maxSpeed);
 }
 
 // ============================================================================
@@ -205,12 +257,12 @@ void RobotStateMachine::followLine()
 void RobotStateMachine::start()
 {
     _currentState = STATE_LINE_FOLLOW;
+    _lastError = 0;
+    _integral = 0;
 }
 
 void RobotStateMachine::stop()
 {
-    _leftMotor->stop();
-    _rightMotor->stop();
     _currentState = STATE_IDLE;
 }
 
@@ -273,4 +325,11 @@ void RobotStateMachine::printStatus()
     Serial.print(_leftMotor->getSpeed());
     Serial.print(" R=");
     Serial.println(_rightMotor->getSpeed());
+    
+    Serial.print(" | PID: Kp=");
+    Serial.print(_kp, 3);
+    Serial.print(" Ki=");
+    Serial.print(_ki, 3);
+    Serial.print(" Kd=");
+    Serial.println(_kd, 3);
 }

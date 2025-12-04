@@ -60,7 +60,8 @@
 // TIMING CONSTANTS
 // ============================================================================
 #define CONTROL_LOOP_MS     20
-#define TURN_90_TIME_MS     600
+#define RIGHT_TURN_90_TIME_MS     600
+#define LEFT_TURN_90_TIME_MS      1000
 #define TURN_180_TIME_MS    1200
 #define JUNCTION_FWD_MS     150
 
