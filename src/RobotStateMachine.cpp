@@ -25,7 +25,7 @@ RobotStateMachine::RobotStateMachine(L298NMotor* left, L298NMotor* right, LineSe
     _maxSpeed = MAX_SPEED;
     
     _turnStartTime = 0;
-    _junctionForwardTime = 0;
+    _smallForwardTime = 0;
     
     // Initialize output variables
     _leftSpeedNew = 0;
@@ -58,7 +58,7 @@ void RobotStateMachine::update()
 }
 
 // ============================================================================
-// PART 1: STATE TRANSITIONS
+// STATE TRANSITIONS
 // ============================================================================
 
 void RobotStateMachine::updateStateTransitions()
@@ -74,57 +74,126 @@ void RobotStateMachine::updateStateTransitions()
         case STATE_LINE_FOLLOW:
             // Check for junction (only in MAZE mode)
             if (junction != JUNCTION_NONE && junction != JUNCTION_LOST) {
-                if (_currentMode == MODE_MAZE_SOLVE) {
-                    _currentState = STATE_JUNCTION_FORWARD;
-                    _junctionForwardTime = millis();
+                if (_currentMode == MODE_MAZE_SOLVE) 
+                {
+                    switch (junction)
+                    {
+                        case JUNCTION_LEFT:
+                            _currentState = STATE_SMALL_FORWARD;
+                            _storedJunction = JUNCTION_LEFT;
+                            break;
+                        case JUNCTION_RIGHT:
+                            _currentState = STATE_SMALL_FORWARD;
+                            _storedJunction = JUNCTION_RIGHT;
+                            break;
+                        case JUNCTION_T:
+                            _currentState = STATE_SMALL_FORWARD;
+                            _storedJunction = JUNCTION_T;
+                            break;
+                        case JUNCTION_LOST:
+                            _currentState = STATE_TURN_AROUND;
+                            break;
+                        default:
+                            break;
+                    }
                 }
             }
-            
             // Check for lost line
             if (junction == JUNCTION_LOST) {
-                _currentState = STATE_LOST;
+                _currentState = STATE_TURN_AROUND;
             }
             break;
             
-        case STATE_JUNCTION_FORWARD:
-            // Wait for forward movement to complete
-            if (millis() - _junctionForwardTime > JUNCTION_FWD_MS) {
-                junction = _lineSensor->detectJunction();
+        case STATE_SMALL_FORWARD:
+            
+            if (millis() - _smallForwardTime > SMALL_FWD_MS) {
+
                 
-                if (junction == JUNCTION_LEFT || junction == JUNCTION_T) {
-                    _currentState = STATE_TURN_LEFT;
-                    _turnStartTime = millis();
+                junction = _lineSensor->detectJunction();
+
+               
+                Serial.print("Stored Junction = ");
+                switch (_storedJunction) {
+                    case JUNCTION_LEFT:  Serial.println("LEFT"); break;
+                    case JUNCTION_RIGHT: Serial.println("RIGHT"); break;
+                    case JUNCTION_T:     Serial.println("T"); break;
+                    case JUNCTION_NONE:  Serial.println("NONE"); break;
+                    case JUNCTION_LOST:  Serial.println("LOST"); break;
+                    default:             Serial.println("UNKNOWN"); break;
                 }
-                else if (junction == JUNCTION_RIGHT) {
-                    _currentState = STATE_TURN_RIGHT;
-                    _turnStartTime = millis();
-                }
-                else if (junction == JUNCTION_CROSS) {
-                    _currentState = STATE_LINE_FOLLOW;
-                }
-                else {
-                    _currentState = STATE_LINE_FOLLOW;
+
+               
+                switch (junction)
+                {
+                    // ---------------------------------------------------------
+                    case JUNCTION_T:   // End of maze?
+                        _currentState = STATE_LINE_FOLLOW;
+                        break;
+
+                    // ---------------------------------------------------------
+                    case JUNCTION_NONE:   // Found a line after small forward
+                        switch (_storedJunction)
+                        {
+                            case JUNCTION_LEFT:
+                            case JUNCTION_T:
+                                _currentState = STATE_TURN_LEFT;
+                                _turnStartTime = millis();
+                                break;
+
+                            case JUNCTION_RIGHT:
+                                _currentState = STATE_LINE_FOLLOW;
+                                break;
+
+                            default:
+                                break;
+                        }
+                        break;
+
+                    // ---------------------------------------------------------
+                    case JUNCTION_LOST:   // Everything white after small forward
+                        switch (_storedJunction)
+                        {
+                            case JUNCTION_LEFT:
+                            case JUNCTION_T:
+                                _currentState = STATE_TURN_LEFT;
+                                _turnStartTime = millis();
+                                break;
+
+                            case JUNCTION_RIGHT:
+                                _currentState = STATE_TURN_RIGHT;
+                                _turnStartTime = millis();
+                                break;
+
+                            default:
+                                break;
+                        }
+                        break;
+
+                    // ---------------------------------------------------------
+                    default:
+                        // Ignore other junctions (e.g. CROSS)
+                        break;
                 }
             }
             break;
             
         case STATE_TURN_LEFT:
             // Check if turn time completed
-            if (millis() - _turnStartTime > LEFT_TURN_90_TIME_MS) {
+            if (millis() - _turnStartTime > LEFT_TURN_90_TIME_MS && junction == JUNCTION_NONE) {
                 _currentState = STATE_LINE_FOLLOW;
             }
             break;
             
         case STATE_TURN_RIGHT:
             // Check if turn time completed
-            if (millis() - _turnStartTime > RIGHT_TURN_90_TIME_MS) {
+            if (millis() - _turnStartTime > RIGHT_TURN_90_TIME_MS && junction == JUNCTION_NONE) {
                 _currentState = STATE_LINE_FOLLOW;
             }
             break;
             
         case STATE_TURN_AROUND:
             // Check if U-turn time completed
-            if (millis() - _turnStartTime > TURN_180_TIME_MS) {
+            if (millis() - _turnStartTime > TURN_180_TIME_MS && junction == JUNCTION_NONE) {
                 _currentState = STATE_LINE_FOLLOW;
             }
             break;
@@ -168,19 +237,19 @@ void RobotStateMachine::updateOutputs()
             calculatePIDSpeeds();
             break;
             
-        case STATE_JUNCTION_FORWARD:
+        case STATE_SMALL_FORWARD:
             _leftSpeedNew = _baseSpeed;
             _rightSpeedNew = _baseSpeed;
             break;
             
         case STATE_TURN_LEFT:
-            _leftSpeedNew = 0;
+            _leftSpeedNew = -TURN_SPEED;
             _rightSpeedNew = TURN_SPEED;
             break;
             
         case STATE_TURN_RIGHT:
             _leftSpeedNew = TURN_SPEED;
-            _rightSpeedNew = 0;
+            _rightSpeedNew = -TURN_SPEED;
             break;
             
         case STATE_TURN_AROUND:
@@ -304,7 +373,7 @@ void RobotStateMachine::printStatus()
     switch(_currentState) {
         case STATE_IDLE: Serial.print("IDLE"); break;
         case STATE_LINE_FOLLOW: Serial.print("LINE_FOLLOW"); break;
-        case STATE_JUNCTION_FORWARD: Serial.print("JUNCTION_FWD"); break;
+        case STATE_SMALL_FORWARD: Serial.print("SMALL_FWD"); break;
         case STATE_TURN_LEFT: Serial.print("TURN_LEFT"); break;
         case STATE_TURN_RIGHT: Serial.print("TURN_RIGHT"); break;
         case STATE_TURN_AROUND: Serial.print("TURN_AROUND"); break;

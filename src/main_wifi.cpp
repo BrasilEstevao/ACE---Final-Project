@@ -253,7 +253,7 @@
 //         switch(robot.getState()) {
 //             case STATE_IDLE: Serial.print("IDLE"); break;
 //             case STATE_LINE_FOLLOW: Serial.print("FOLLOW"); break;
-//             case STATE_JUNCTION_FORWARD: Serial.print("JUNCTION"); break;
+//             case STATE_SMALL_FORWARD: Serial.print("JUNCTION"); break;
 //             case STATE_TURN_LEFT: Serial.print("LEFT"); break;
 //             case STATE_TURN_RIGHT: Serial.print("RIGHT"); break;
 //             case STATE_TURN_AROUND: Serial.print("AROUND"); break;

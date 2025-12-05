@@ -38,32 +38,32 @@
 // ============================================================================
 // MOTOR SPEED CONSTANTS
 // ============================================================================
-#define BASE_SPEED      120
+#define BASE_SPEED      90
 #define MAX_SPEED       200
-#define TURN_SPEED      100
+#define TURN_SPEED      110
 
 // ============================================================================
 // PID TUNING PARAMETERS
 // ============================================================================
-#define KP              0.15f
+#define KP              0.2f
 #define KI              0.0f
-#define KD              0.35f
+#define KD              0.2f
 
 // ============================================================================
 // SENSOR CONFIGURATION
 // ============================================================================
 #define NUM_ANALOG_SENSORS  3    // Sensores centrais para PID
 #define NUM_DIGITAL_SENSORS 2    // Sensores das pontas para junções
-#define IR_THRESHOLD        850  // Threshold para sensores analógicos
+#define IR_THRESHOLD        750  // Threshold para sensores analógicos
 
 // ============================================================================
 // TIMING CONSTANTS
 // ============================================================================
-#define CONTROL_LOOP_MS     20
+#define CONTROL_LOOP_MS     15
 #define RIGHT_TURN_90_TIME_MS     600
-#define LEFT_TURN_90_TIME_MS      1000
+#define LEFT_TURN_90_TIME_MS      600
 #define TURN_180_TIME_MS    1200
-#define JUNCTION_FWD_MS     150
+#define SMALL_FWD_MS     300
 
 // ============================================================================
 // WiFi CONFIGURATION (compile-time or runtime)

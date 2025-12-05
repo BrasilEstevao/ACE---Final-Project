@@ -182,21 +182,17 @@ JunctionType LineSensor::detectJunction()
     if (totalBlackCount == 0) {
         return JUNCTION_LOST;
     }
-    else if (totalBlackCount >= 4 && leftEdge && rightEdge) {
-        // All or most sensors detect black = cross junction
-        return JUNCTION_CROSS;
+    else if (leftEdge && rightEdge && analogBlackCount > 0) {
+        // Both edges + center = T junction or cross
+        return JUNCTION_T;
     }
-    else if (leftEdge && !rightEdge && analogBlackCount > 0) {
+    else if (leftEdge && !rightEdge && analogBlackCount  == 3) {
         // Left edge detects + some center = left turn
         return JUNCTION_LEFT;
     }
-    else if (rightEdge && !leftEdge && analogBlackCount > 0) {
+    else if (rightEdge && !leftEdge && analogBlackCount == 3) {
         // Right edge detects + some center = right turn
         return JUNCTION_RIGHT;
-    }
-    else if (leftEdge && rightEdge && analogBlackCount > 0) {
-        // Both edges + center = T junction
-        return JUNCTION_T;
     }
     else {
         // Normal line following
@@ -227,7 +223,7 @@ bool LineSensor::getDigitalSensorValue(int index)
 void LineSensor::printValues()
 {
     Serial.print("D:[");
-    Serial.print(_digitalSensors[0] ? "■" : "□");
+    Serial.print(_digitalSensors[0] ? "□" : "■");
     Serial.print("] A:[");
     
     for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
@@ -238,7 +234,7 @@ void LineSensor::printValues()
     }
     
     Serial.print("] D:[");
-    Serial.print(_digitalSensors[1] ? "■" : "□");
+    Serial.print(_digitalSensors[1] ? "□" : "■");
     Serial.print("] Pos:");
     if (_linePosition >= 0) Serial.print(" ");
     if (abs(_linePosition) < 1000) Serial.print(" ");

@@ -10,13 +10,14 @@
 enum RobotState {
     STATE_IDLE,              // Stopped, waiting for command
     STATE_LINE_FOLLOW,       // Following line with PID
-    STATE_JUNCTION_FORWARD,  // Moving forward at junction
+    STATE_SMALL_FORWARD,  // Moving forward at junction
     STATE_TURN_LEFT,         // Executing left turn
     STATE_TURN_RIGHT,        // Executing right turn
     STATE_TURN_AROUND,       // Executing U-turn
     STATE_OBSTACLE_AVOID,    // Avoiding obstacle
     STATE_MAZE_SOLVE,        // Solving maze (redirects to LINE_FOLLOW)
-    STATE_LOST               // Lost line, searching
+    STATE_LOST,               // Lost line, searching
+    STATE_FINISHED
 };
 
 /**
@@ -28,6 +29,7 @@ enum RobotMode {
     MODE_MAZE_SOLVE,       // Challenge 3: Grid maze solver
     MODE_NAVIGATE          // Challenge 4: Self-localization navigation
 };
+
 
 /**
  * @class RobotStateMachine
@@ -53,6 +55,7 @@ public:
      * @param sensor Pointer to line sensor object
      */
     RobotStateMachine(L298NMotor* left, L298NMotor* right, LineSensor* sensor);
+    JunctionType _storedJunction = JUNCTION_LEFT;
     
     /**
      * @brief Update state machine (call in main loop at 50Hz)
@@ -149,7 +152,7 @@ private:
     // TIMING VARIABLES
     // ========================================================================
     unsigned long _turnStartTime;        // When turn started
-    unsigned long _junctionForwardTime;  // When junction forward started
+    unsigned long _smallForwardTime;  // When junction forward started
     
     // ========================================================================
     // STATE MACHINE METHODS (3-stage pattern)

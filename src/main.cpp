@@ -71,7 +71,7 @@ void processCommand(String cmd) {
     else if (cmd == "test") {
         Serial.println("\n========== SENSOR TEST ==========");
         Serial.println("Reading all 5 sensors (10 samples)...");
-        Serial.println("Digital sensors: ■=BLACK □=WHITE\n");
+        Serial.println("Digital sensors: □=BLACK ■=WHITE\n");
         for (int i = 0; i < 10; i++) {
             lineSensor.read();
             
@@ -286,7 +286,7 @@ void loop() {
     // STATUS OUTPUT (1 second)
     // ========================================================================
     
-    if (currentTime - lastStatusTime >= 1000) {
+    if (currentTime - lastStatusTime >= 200) {
         lastStatusTime = currentTime;
         
         if (robot.getState() != STATE_IDLE) {
@@ -294,7 +294,7 @@ void loop() {
             switch(robot.getState()) {
                 case STATE_IDLE: Serial.print("IDLE"); break;
                 case STATE_LINE_FOLLOW: Serial.print("FOLLOW"); break;
-                case STATE_JUNCTION_FORWARD: Serial.print("JUNCTION"); break;
+                case STATE_SMALL_FORWARD: Serial.print("SMALL_FORWARD"); break;
                 case STATE_TURN_LEFT: Serial.print("LEFT"); break;
                 case STATE_TURN_RIGHT: Serial.print("RIGHT"); break;
                 case STATE_TURN_AROUND: Serial.print("AROUND"); break;
