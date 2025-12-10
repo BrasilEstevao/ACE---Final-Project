@@ -1,8 +1,3 @@
-/**
- * @file WiFiTerminal.cpp
- * @brief WiFi terminal for arduino-pico framework
- */
-
 #include "WiFiTerminal.h"
 #include "config.h"
 #include <WiFi.h>
@@ -16,6 +11,7 @@ WiFiTerminal::WiFiTerminal()
     _server = nullptr;
     _client = WiFiClient();
     _isConnected = false;
+    _commandBuffer = "";
 }
 
 // ============================================================================
@@ -52,7 +48,6 @@ bool WiFiTerminal::begin(const char* ssid, const char* password)
     Serial.print("Connect with: telnet ");
     Serial.println(IP);
     
-    // Wait a bit for server to fully start
     delay(500);
     
     Serial.println("\n============================");
@@ -68,8 +63,10 @@ bool WiFiTerminal::begin(const char* ssid, const char* password)
 
 void WiFiTerminal::update()
 {
+    if (!_server) return;
+    
     // Check for new client
-    WiFiClient newClient = _server->accept();
+    WiFiClient newClient = _server->available();
     
     if (newClient) {
         // Disconnect previous client if exists
@@ -79,17 +76,20 @@ void WiFiTerminal::update()
         
         _client = newClient;
         _isConnected = true;
+        _commandBuffer = "";  // Clear buffer on new connection
         
         Serial.println("WiFi: Client connected");
-        println("=== Robot Terminal ===");
+        println("\n=== Robot Terminal ===");
         println("Type 'help' for commands");
         println("=====================\n");
+        print("> ");
     }
     
     // Check if client disconnected
     if (_isConnected && !_client.connected()) {
         _client.stop();
         _isConnected = false;
+        _commandBuffer = "";
         Serial.println("WiFi: Client disconnected");
     }
 }
@@ -110,17 +110,17 @@ void WiFiTerminal::print(const char* str)
     }
 }
 
-void WiFiTerminal::print(const String& str)
-{
-    if (isConnected()) {
-        _client.print(str);
-    }
-}
-
 void WiFiTerminal::println(const char* str)
 {
     if (isConnected()) {
         _client.println(str);
+    }
+}
+
+void WiFiTerminal::print(const String& str)
+{
+    if (isConnected()) {
+        _client.print(str);
     }
 }
 
@@ -131,7 +131,6 @@ void WiFiTerminal::println(const String& str)
     }
 }
 
-// Helper for formatted output
 void WiFiTerminal::print(int val)
 {
     if (isConnected()) {
@@ -146,8 +145,29 @@ void WiFiTerminal::println(int val)
     }
 }
 
+void WiFiTerminal::print(float val, int decimalPlaces)
+{
+    if (isConnected()) {
+        _client.print(val, decimalPlaces);
+    }
+}
+
+void WiFiTerminal::println(float val, int decimalPlaces)
+{
+    if (isConnected()) {
+        _client.println(val, decimalPlaces);
+    }
+}
+
+void WiFiTerminal::println()
+{
+    if (isConnected()) {
+        _client.println();
+    }
+}
+
 // ============================================================================
-// DATA RECEPTION
+// DATA RECEPTION - CORRIGIDO
 // ============================================================================
 
 int WiFiTerminal::available()
@@ -168,35 +188,51 @@ int WiFiTerminal::read()
 
 String WiFiTerminal::readLine()
 {
-    String line = "";
+    if (!isConnected()) {
+        return "";
+    }
     
-    if (isConnected()) {
-        while (_client.available()) {
-            char c = _client.read();
-            
-            // Handle backspace
-            if (c == '\b' || c == 127) {
-                if (line.length() > 0) {
-                    line.remove(line.length() - 1);
-                    _client.print("\b \b");
-                }
-                continue;
+    // Read all available characters into buffer
+    while (_client.available()) {
+        char c = _client.read();
+        
+        // Handle backspace (ASCII 8 or DEL 127)
+        if (c == '\b' || c == 127) {
+            if (_commandBuffer.length() > 0) {
+                _commandBuffer.remove(_commandBuffer.length() - 1);
+                // Send backspace sequence to terminal
+                _client.print("\b \b");
             }
-            
-            // Echo character
-            _client.print(c);
-            
-            // Check for end of line
-            if (c == '\n' || c == '\r') {
+            continue;
+        }
+        
+        // Ignore carriage return
+        if (c == '\r') {
+            continue;
+        }
+        
+        // Check for newline (end of command)
+        if (c == '\n') {
+            if (_commandBuffer.length() > 0) {
+                String command = _commandBuffer;
+                _commandBuffer = "";  // Clear buffer for next command
+                
+                // Send newline
                 _client.println();
-                break;
+                
+                return command;
             }
-            
-            line += c;
+            continue;
+        }
+        
+        // Add printable characters (NO ECHO - Telnet client handles it)
+        if (c >= 32 && c <= 126) {
+            _commandBuffer += c;
         }
     }
     
-    return line;
+    // No complete line yet
+    return "";
 }
 
 // ============================================================================

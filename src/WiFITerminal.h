@@ -1,4 +1,3 @@
-
 #ifndef WIFI_TERMINAL_H
 #define WIFI_TERMINAL_H
 
@@ -6,16 +5,10 @@
 
 /**
  * @class WiFiTerminal
- * @brief Wireless terminal for robot debugging and control
+ * @brief WiFi-based terminal for robot control
  * 
- * Creates a WiFi Access Point and Telnet server to allow wireless
- * serial-like communication with the robot.
- * 
- * Usage:
- * 1. Robot creates WiFi AP (e.g., "PicoRobot")
- * 2. Connect to AP with laptop/phone
- * 3. Use telnet to connect: telnet 192.168.4.1
- * 4. Send/receive commands and debug data
+ * Creates an Access Point and Telnet server for remote control.
+ * Handles line-buffered input (waits for Enter before processing).
  */
 class WiFiTerminal {
 public:
@@ -34,7 +27,6 @@ public:
     
     /**
      * @brief Update connection (call in main loop)
-     * 
      * Checks for new clients and handles disconnections
      */
     void update();
@@ -45,63 +37,53 @@ public:
      */
     bool isConnected();
     
-    /**
-     * @brief Send string to client
-     * @param str String to send
-     */
+    // ====================================================================
+    // DATA TRANSMISSION
+    // ====================================================================
+    
     void print(const char* str);
-    
-    /**
-     * @brief Send string with newline
-     * @param str String to send
-     */
     void println(const char* str);
-    
-    /**
-     * @brief Send string (overload)
-     * @param str String to send
-     */
     void print(const String& str);
-    
-    /**
-     * @brief Send string with newline (overload)
-     * @param str String to send
-     */
     void println(const String& str);
-    
-    /**
-     * @brief Send integer
-     * @param val Integer to send
-     */
     void print(int val);
-    
-    /**
-     * @brief Send integer with newline
-     * @param val Integer to send
-     */
     void println(int val);
+    void print(float val, int decimalPlaces = 2);
+    void println(float val, int decimalPlaces = 2);
+    void println();
+    
+    // ====================================================================
+    // DATA RECEPTION
+    // ====================================================================
     
     /**
-     * @brief Check if data available to read
-     * @return Number of bytes available
+     * @brief Check how many bytes available
+     * @return Number of bytes available to read
      */
     int available();
     
     /**
      * @brief Read single byte
-     * @return Byte value, or -1 if none available
+     * @return Byte read or -1 if none available
      */
     int read();
     
     /**
-     * @brief Read line of text
-     * @return String containing line (without newline)
+     * @brief Read complete command line
+     * 
+     * IMPORTANT: This function buffers characters until newline (\n)
+     * Only returns complete lines - empty string if line not ready yet
+     * 
+     * @return Complete command line (without \n) or empty string
      */
     String readLine();
     
+    // ====================================================================
+    // UTILITY
+    // ====================================================================
+    
     /**
      * @brief Get AP IP address
-     * @return IP address
+     * @return IP address of the Access Point
      */
     IPAddress getIP();
     
@@ -112,9 +94,10 @@ public:
     int getClientCount();
     
 private:
-    WiFiServer* _server;     // Telnet server
-    WiFiClient _client;      // Connected client
-    bool _isConnected;       // Connection status
+    WiFiServer* _server;      // Telnet server
+    WiFiClient _client;       // Connected client
+    bool _isConnected;        // Connection status
+    String _commandBuffer;    // Buffer for accumulating command characters
 };
 
 #endif // WIFI_TERMINAL_H

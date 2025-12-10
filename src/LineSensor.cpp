@@ -186,11 +186,11 @@ JunctionType LineSensor::detectJunction()
         // Both edges + center = T junction or cross
         return JUNCTION_T;
     }
-    else if (leftEdge && !rightEdge && analogBlackCount  == 3) {
+    else if (leftEdge && !rightEdge && analogBlackCount  > 2) {
         // Left edge detects + some center = left turn
         return JUNCTION_LEFT;
     }
-    else if (rightEdge && !leftEdge && analogBlackCount == 3) {
+    else if (rightEdge && !leftEdge && analogBlackCount > 2) {
         // Right edge detects + some center = right turn
         return JUNCTION_RIGHT;
     }

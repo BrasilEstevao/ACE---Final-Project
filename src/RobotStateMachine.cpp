@@ -12,8 +12,13 @@ RobotStateMachine::RobotStateMachine(L298NMotor* left, L298NMotor* right, LineSe
     _rightMotor = right;
     _lineSensor = sensor;
     
-    _currentState = STATE_IDLE;
+    _state = STATE_IDLE;
+    _newState = STATE_IDLE;
     _currentMode = MODE_LINE_FOLLOW;
+    
+    
+    _tes = millis();
+    _tis = 0;
     
     _kp = KP;
     _ki = KI;
@@ -24,10 +29,9 @@ RobotStateMachine::RobotStateMachine(L298NMotor* left, L298NMotor* right, LineSe
     _baseSpeed = BASE_SPEED;
     _maxSpeed = MAX_SPEED;
     
-    _turnStartTime = 0;
-    _smallForwardTime = 0;
+    _storedJunction = JUNCTION_NONE;
     
-    // Initialize output variables
+    
     _leftSpeedNew = 0;
     _rightSpeedNew = 0;
 }
@@ -38,23 +42,40 @@ RobotStateMachine::RobotStateMachine(L298NMotor* left, L298NMotor* right, LineSe
 
 void RobotStateMachine::update()
 {
-    // Read sensors
+
+    updateTIS();
+    
+
     _lineSensor->read();
     
-    // ========================================================================
-    // STATE TRANSITIONS
-    // ========================================================================
     updateStateTransitions();
-    
-    // ========================================================================
-    // UPDATE OUTPUTS 
-    // ========================================================================
+       
     updateOutputs();
     
-    // ========================================================================
-    // APPLY OUTPUTS
-    // ========================================================================
     applyOutputs();
+}
+
+// ============================================================================
+// TIMING MANAGEMENT (TIS/TES)
+// ============================================================================
+
+void RobotStateMachine::updateTIS()
+{
+    _tis = millis() - _tes;
+}
+
+void RobotStateMachine::changeState(RobotState newState)
+{
+    if (_state != newState) {
+        _state = newState;
+        _tes = millis();  
+        _tis = 0;       
+    }
+}
+
+unsigned long RobotStateMachine::getTIS()
+{
+    return _tis;
 }
 
 // ============================================================================
@@ -65,7 +86,10 @@ void RobotStateMachine::updateStateTransitions()
 {
     JunctionType junction = _lineSensor->detectJunction();
     
-    switch (_currentState) 
+    // Store current state for comparison
+    _newState = _state;
+    
+    switch (_state) 
     {
         case STATE_IDLE:
             // No automatic transitions - controlled by start() command
@@ -79,19 +103,19 @@ void RobotStateMachine::updateStateTransitions()
                     switch (junction)
                     {
                         case JUNCTION_LEFT:
-                            _currentState = STATE_SMALL_FORWARD;
+                            _newState = STATE_SMALL_FORWARD;
                             _storedJunction = JUNCTION_LEFT;
                             break;
                         case JUNCTION_RIGHT:
-                            _currentState = STATE_SMALL_FORWARD;
+                            _newState = STATE_SMALL_FORWARD;
                             _storedJunction = JUNCTION_RIGHT;
                             break;
                         case JUNCTION_T:
-                            _currentState = STATE_SMALL_FORWARD;
+                            _newState = STATE_SMALL_FORWARD;
                             _storedJunction = JUNCTION_T;
                             break;
                         case JUNCTION_LOST:
-                            _currentState = STATE_TURN_AROUND;
+                            _newState = STATE_TURN_AROUND;
                             break;
                         default:
                             break;
@@ -100,18 +124,15 @@ void RobotStateMachine::updateStateTransitions()
             }
             // Check for lost line
             if (junction == JUNCTION_LOST) {
-                _currentState = STATE_TURN_AROUND;
+                _newState = STATE_TURN_AROUND;
             }
             break;
             
         case STATE_SMALL_FORWARD:
-            
-            if (millis() - _smallForwardTime > SMALL_FWD_MS) {
-
-                
+            // Check if enough time has passed
+            if (_tis > SMALL_FWD_MS) {
                 junction = _lineSensor->detectJunction();
 
-               
                 Serial.print("Stored Junction = ");
                 switch (_storedJunction) {
                     case JUNCTION_LEFT:  Serial.println("LEFT"); break;
@@ -122,26 +143,22 @@ void RobotStateMachine::updateStateTransitions()
                     default:             Serial.println("UNKNOWN"); break;
                 }
 
-               
                 switch (junction)
                 {
-                    // ---------------------------------------------------------
-                    case JUNCTION_T:   // End of maze?
-                        _currentState = STATE_LINE_FOLLOW;
+                    case JUNCTION_T:
+                        _newState = STATE_FINISHED;
                         break;
 
-                    // ---------------------------------------------------------
-                    case JUNCTION_NONE:   // Found a line after small forward
+                    case JUNCTION_NONE:
                         switch (_storedJunction)
                         {
                             case JUNCTION_LEFT:
                             case JUNCTION_T:
-                                _currentState = STATE_TURN_LEFT;
-                                _turnStartTime = millis();
+                                _newState = STATE_TURN_LEFT;
                                 break;
 
                             case JUNCTION_RIGHT:
-                                _currentState = STATE_LINE_FOLLOW;
+                                _newState = STATE_LINE_FOLLOW;
                                 break;
 
                             default:
@@ -149,19 +166,16 @@ void RobotStateMachine::updateStateTransitions()
                         }
                         break;
 
-                    // ---------------------------------------------------------
-                    case JUNCTION_LOST:   // Everything white after small forward
+                    case JUNCTION_LOST:
                         switch (_storedJunction)
                         {
                             case JUNCTION_LEFT:
                             case JUNCTION_T:
-                                _currentState = STATE_TURN_LEFT;
-                                _turnStartTime = millis();
+                                _newState = STATE_TURN_LEFT;
                                 break;
 
                             case JUNCTION_RIGHT:
-                                _currentState = STATE_TURN_RIGHT;
-                                _turnStartTime = millis();
+                                _newState = STATE_TURN_RIGHT;
                                 break;
 
                             default:
@@ -169,55 +183,59 @@ void RobotStateMachine::updateStateTransitions()
                         }
                         break;
 
-                    // ---------------------------------------------------------
                     default:
-                        // Ignore other junctions (e.g. CROSS)
                         break;
                 }
             }
             break;
             
         case STATE_TURN_LEFT:
-            // Check if turn time completed
-            if (millis() - _turnStartTime > LEFT_TURN_90_TIME_MS && junction == JUNCTION_NONE) {
-                _currentState = STATE_LINE_FOLLOW;
+            // Check if turn time completed AND back on line
+            if (_tis > LEFT_TURN_90_TIME_MS && junction == JUNCTION_NONE) {
+                _newState = STATE_LINE_FOLLOW;
             }
             break;
             
         case STATE_TURN_RIGHT:
-            // Check if turn time completed
-            if (millis() - _turnStartTime > RIGHT_TURN_90_TIME_MS && junction == JUNCTION_NONE) {
-                _currentState = STATE_LINE_FOLLOW;
+            // Check if turn time completed AND back on line
+            if (_tis > RIGHT_TURN_90_TIME_MS && junction == JUNCTION_NONE) {
+                _newState = STATE_LINE_FOLLOW;
             }
             break;
             
         case STATE_TURN_AROUND:
-            // Check if U-turn time completed
-            if (millis() - _turnStartTime > TURN_180_TIME_MS && junction == JUNCTION_NONE) {
-                _currentState = STATE_LINE_FOLLOW;
+            // Check if U-turn time completed AND back on line
+            if (_tis > TURN_180_TIME_MS && junction == JUNCTION_NONE) {
+                _newState = STATE_LINE_FOLLOW;
             }
             break;
             
         case STATE_OBSTACLE_AVOID:
             // Simple timeout transition
-            if (millis() - _turnStartTime > 1000) {
-                _currentState = STATE_LINE_FOLLOW;
+            if (_tis > 1000) {
+                _newState = STATE_LINE_FOLLOW;
             }
             break;
             
         case STATE_MAZE_SOLVE:
             // Redirect to line follow
-            _currentState = STATE_LINE_FOLLOW;
+            _newState = STATE_LINE_FOLLOW;
             break;
             
         case STATE_LOST:
             // After stopping briefly, start searching
-            if (millis() - _turnStartTime > 500) {
-                _currentState = STATE_TURN_RIGHT;
-                _turnStartTime = millis();
+            if (_tis > 500) {
+                _newState = STATE_TURN_RIGHT;
             }
             break;
+            
+        case STATE_FINISHED:
+            // Stay in finished state
+            break;
     }
+    
+    // Apply state change if needed
+    changeState(_newState);
 }
 
 // ============================================================================
@@ -226,7 +244,7 @@ void RobotStateMachine::updateStateTransitions()
 
 void RobotStateMachine::updateOutputs()
 {
-    switch (_currentState)
+    switch (_state)
     {
         case STATE_IDLE:
             _leftSpeedNew = 0;
@@ -263,19 +281,18 @@ void RobotStateMachine::updateOutputs()
             break;
             
         case STATE_MAZE_SOLVE:
-            // Should not reach here due to transition
             _leftSpeedNew = 0;
             _rightSpeedNew = 0;
             break;
             
         case STATE_LOST:
-            // Stop during lost state
             _leftSpeedNew = 0;
             _rightSpeedNew = 0;
-            // Set timer for search
-            if (_turnStartTime == 0) {
-                _turnStartTime = millis();
-            }
+            break;
+            
+        case STATE_FINISHED:
+            _leftSpeedNew = 0;
+            _rightSpeedNew = 0;
             break;
     }
 }
@@ -291,7 +308,7 @@ void RobotStateMachine::applyOutputs()
 }
 
 // ============================================================================
-// PID CALCULATION (Helper for LINE_FOLLOW state)
+// PID CALCULATION
 // ============================================================================
 
 void RobotStateMachine::calculatePIDSpeeds()
@@ -325,20 +342,20 @@ void RobotStateMachine::calculatePIDSpeeds()
 
 void RobotStateMachine::start()
 {
-    _currentState = STATE_LINE_FOLLOW;
+    changeState(STATE_LINE_FOLLOW);
     _lastError = 0;
     _integral = 0;
 }
 
 void RobotStateMachine::stop()
 {
-    _currentState = STATE_IDLE;
+    changeState(STATE_IDLE);
 }
 
 void RobotStateMachine::setMode(RobotMode mode)
 {
     _currentMode = mode;
-    _currentState = STATE_IDLE;
+    changeState(STATE_IDLE);
 }
 
 void RobotStateMachine::setSpeed(int speed)
@@ -355,7 +372,7 @@ void RobotStateMachine::setPID(float kp, float ki, float kd)
 
 RobotState RobotStateMachine::getState()
 {
-    return _currentState;
+    return _state;
 }
 
 RobotMode RobotStateMachine::getMode()
@@ -370,7 +387,7 @@ RobotMode RobotStateMachine::getMode()
 void RobotStateMachine::printStatus()
 {
     Serial.print("State: ");
-    switch(_currentState) {
+    switch(_state) {
         case STATE_IDLE: Serial.print("IDLE"); break;
         case STATE_LINE_FOLLOW: Serial.print("LINE_FOLLOW"); break;
         case STATE_SMALL_FORWARD: Serial.print("SMALL_FWD"); break;
@@ -380,7 +397,12 @@ void RobotStateMachine::printStatus()
         case STATE_OBSTACLE_AVOID: Serial.print("OBSTACLE_AVOID"); break;
         case STATE_MAZE_SOLVE: Serial.print("MAZE_SOLVE"); break;
         case STATE_LOST: Serial.print("LOST"); break;
+        case STATE_FINISHED: Serial.print("FINISHED"); break;
     }
+    
+    Serial.print(" | TIS: ");
+    Serial.print(_tis);
+    Serial.print("ms");
     
     Serial.print(" | Mode: ");
     switch(_currentMode) {

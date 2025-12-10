@@ -30,40 +30,46 @@
 // ============================================================================
 // ENCODER PINS (Optional)
 // ============================================================================
-#define ENC1_A          2
-#define ENC1_B          3
-#define ENC2_A          0
-#define ENC2_B          1
+
+//left encoder
+#define ENC1_A          15 
+#define ENC1_B          16
+
+//right encoder
+#define ENC2_A          17
+#define ENC2_B          18
 
 // ============================================================================
 // MOTOR SPEED CONSTANTS
 // ============================================================================
 #define BASE_SPEED      90
 #define MAX_SPEED       200
-#define TURN_SPEED      110
+#define TURN_SPEED      100
 
 // ============================================================================
 // PID TUNING PARAMETERS
 // ============================================================================
-#define KP              0.2f
+#define KP              0.3f
 #define KI              0.0f
-#define KD              0.2f
+#define KD              0.5f
+//Tests
+// Kp = 0.1 Ki = 0 Kd = 0. 5 -> Speed 100
 
 // ============================================================================
 // SENSOR CONFIGURATION
 // ============================================================================
 #define NUM_ANALOG_SENSORS  3    // Sensores centrais para PID
 #define NUM_DIGITAL_SENSORS 2    // Sensores das pontas para junções
-#define IR_THRESHOLD        750  // Threshold para sensores analógicos
+#define IR_THRESHOLD         520 //Threshold para sensores analógicos
 
 // ============================================================================
 // TIMING CONSTANTS
 // ============================================================================
-#define CONTROL_LOOP_MS     15
+#define CONTROL_LOOP_MS     20
 #define RIGHT_TURN_90_TIME_MS     600
 #define LEFT_TURN_90_TIME_MS      600
-#define TURN_180_TIME_MS    1200
-#define SMALL_FWD_MS     300
+#define TURN_180_TIME_MS    900
+#define SMALL_FWD_MS     400
 
 // ============================================================================
 // WiFi CONFIGURATION (compile-time or runtime)
