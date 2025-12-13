@@ -124,7 +124,7 @@ void LineSensor::calibrate()
 }
 
 // ============================================================================
-// LINE POSITION CALCULATION (PID)
+// LINE POSITION CALCULATION 
 // ============================================================================
 
 int LineSensor::getPosition()
