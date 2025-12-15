@@ -25,6 +25,13 @@ unsigned long lastSensorPrintTime = 0;
 bool sensorStreamEnabled = false;
 
 // ============================================================================
+// ULTRASONIC SENSOR VARIABLES
+// ============================================================================
+
+unsigned long duration;
+float distance;
+
+// ============================================================================
 // TERMINAL OUTPUT WRAPPER
 // ============================================================================
 
@@ -273,6 +280,12 @@ void setup() {
     
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);
+
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+
+    // Ensure ultrasonic trig pin is low
+    digitalWrite(TRIG_PIN, LOW);
     
     Serial.println("\n========================================");
     Serial.println(" LINE FOLLOWING ROBOT - DUAL CONTROL");
@@ -310,6 +323,20 @@ void setup() {
 
 void loop() {
     unsigned long currentTime = millis();
+
+    // ========================================================================
+    // READ ULTRASONIC SENSOR
+    // ========================================================================
+
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+
+    duration = pulseIn(ECHO_PIN, HIGH);
+    distance = (duration*.0343)/2;
+
+    Serial.print("Distance: ");
+    Serial.println(distance);
     
     // ========================================================================
     // UPDATE WIFI CONNECTION
