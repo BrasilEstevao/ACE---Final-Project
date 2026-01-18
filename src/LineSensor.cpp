@@ -223,7 +223,7 @@ bool LineSensor::getDigitalSensorValue(int index)
 void LineSensor::printValues()
 {
     Serial.print("D:[");
-    Serial.print(_digitalSensors[0] ? "□" : "■");
+    Serial.print(_digitalSensors[0] ? "â–¡" : "â– ");
     Serial.print("] A:[");
     
     for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
@@ -234,7 +234,7 @@ void LineSensor::printValues()
     }
     
     Serial.print("] D:[");
-    Serial.print(_digitalSensors[1] ? "□" : "■");
+    Serial.print(_digitalSensors[1] ? "â–¡" : "â– ");
     Serial.print("] Pos:");
     if (_linePosition >= 0) Serial.print(" ");
     if (abs(_linePosition) < 1000) Serial.print(" ");
@@ -245,11 +245,11 @@ void LineSensor::printValues()
     JunctionType j = detectJunction();
     switch(j) {
         case JUNCTION_NONE:  Serial.println("LINE  "); break;
-        case JUNCTION_LEFT:  Serial.println("◄ LEFT"); break;
-        case JUNCTION_RIGHT: Serial.println("RIGHT►"); break;
-        case JUNCTION_T:     Serial.println("◄ T ► "); break;
+        case JUNCTION_LEFT:  Serial.println("â—„ LEFT"); break;
+        case JUNCTION_RIGHT: Serial.println("RIGHTâ–º"); break;
+        case JUNCTION_T:     Serial.println("â—„ T â–º "); break;
         case JUNCTION_CROSS: Serial.println("CROSS+"); break;
-        case JUNCTION_LOST:  Serial.println("LOST ✗"); break;
+        case JUNCTION_LOST:  Serial.println("LOST âœ—"); break;
     }
 }
 

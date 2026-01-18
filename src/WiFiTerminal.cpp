@@ -167,7 +167,7 @@ void WiFiTerminal::println()
 }
 
 // ============================================================================
-// DATA RECEPTION - CORRIGIDO
+// DATA RECEPTION 
 // ============================================================================
 
 int WiFiTerminal::available()
@@ -192,7 +192,6 @@ String WiFiTerminal::readLine()
         return "";
     }
     
-    // Read all available characters into buffer
     while (_client.available()) {
         char c = _client.read();
         
@@ -200,7 +199,7 @@ String WiFiTerminal::readLine()
         if (c == '\b' || c == 127) {
             if (_commandBuffer.length() > 0) {
                 _commandBuffer.remove(_commandBuffer.length() - 1);
-                // Send backspace sequence to terminal
+                // Send backspace
                 _client.print("\b \b");
             }
             continue;

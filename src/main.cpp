@@ -2,6 +2,7 @@
 #include "config.h"
 #include "L298NMotor.h"
 #include "LineSensor.h"
+#include "Odometry.h"
 #include "RobotStateMachine.h"
 #include "WiFiTerminal.h"
 
@@ -12,7 +13,8 @@
 L298NMotor leftMotor(MOTOR1_IN1, MOTOR1_IN2, MOTOR1_EN);
 L298NMotor rightMotor(MOTOR2_IN3, MOTOR2_IN4, MOTOR2_EN);
 LineSensor lineSensor;
-RobotStateMachine robot(&leftMotor, &rightMotor, &lineSensor);
+Odometry odometry(WHEEL_DISTANCE, WHEEL_RADIUS);
+RobotStateMachine robot(&leftMotor, &rightMotor, &lineSensor, &odometry);
 WiFiTerminal terminal;
 
 // ============================================================================
@@ -23,6 +25,7 @@ unsigned long lastLoopTime = 0;
 unsigned long lastStatusTime = 0;
 unsigned long lastSensorPrintTime = 0;
 bool sensorStreamEnabled = false;
+bool odomStreamEnabled = false;
 
 // ============================================================================
 // TERMINAL OUTPUT WRAPPER
@@ -92,17 +95,44 @@ void processCommand(String cmd) {
         output.println("status         - Show status");
         output.println("sensors        - Show sensor values once");
         output.println("stream on/off  - Stream sensors continuously");
+        output.println("odom           - Show odometry values once");
+        output.println("ostream on/off - Stream odometry continuously");
+        output.println("resetodom      - Reset odometry to zero");
         output.println("calibrate      - Calibrate analog sensors");
+        output.println("");
+        output.println("=== VELOCITY CONTROL MODE ===");
+        output.println("vel <v> <w>    - Set velocity (v in m/s, w in rad/s)");
+        output.println("               Example: vel 0.2 0.5");
+        output.println("               v > 0 = forward, v < 0 = backward");
+        output.println("               w > 0 = turn right, w < 0 = turn left");
+        output.println("");
+        output.println("=== GOTO COMMANDS ===");
+        output.println("forward <m>    - Move forward/back specific distance");
+        output.println("               Example: forward 0.5  (50cm forward)");
+        output.println("               Example: forward -0.3 (30cm backward)");
+        output.println("turn <deg>     - Turn specific angle");
+        output.println("               Example: turn 90   (90Â° right)");
+        output.println("               Example: turn -180 (180Â° left)");
+        output.println("");
+        output.println("=== CONFIGURATION ===");
         output.println("speed <n>      - Set speed (0-255)");
-        output.println("mode <n>       - Set mode (1=follow, 3=maze)");
-        output.println("pid <p> <i> <d> - Set PID gains");
+        output.println("mode <n>       - Set mode:");
+        output.println("                 1=follow, 3=maze, 4=velocity");
+        output.println("pid <p> <i> <d> - Set PID gains for line sensors");
         output.println("threshold <n>  - Set sensor threshold");
         output.println("motors <l> <r> - Test motors directly");
+        output.println("velpid <gains> - Tune velocity PID controller");
+        output.println("               6 params: kp_v ki_v kd_v kp_w ki_w kd_w");
+        output.println("               Example: velpid 50 10 5 20 2 1");
+        output.println("               Units: m/s for v, rad/s for w");
+        output.println("pidmode <on|off> - Toggle PID velocity control");
+        output.println("                 on  = closed-loop (uses odometry)");
+        output.println("                 off = open-loop (direct PWM)");
         output.println("========================================\n");
     }
     else if (cmd == "start") {
         robot.start();
-        output.println(">>> Robot STARTED");
+        output.println(">>> Robot STARTED (odometry reset)");
     }
     else if (cmd == "stop") {
         robot.stop();
@@ -130,9 +160,26 @@ void processCommand(String cmd) {
         output.print(" R=");
         output.println(rightMotor.getSpeed());
         
+        output.print("Position: x=");
+        output.print(odometry.getX(), 3);
+        output.print("m y=");
+        output.print(odometry.getY(), 3);
+        output.print("m Angle=");
+        output.print(odometry.getTheta() * 180.0f / PI, 1);
+        output.println("dgs");
+        
+        output.print("Relative: dist=");
+        output.print(odometry.getRelativeDistance(), 3);
+        output.print("m angle=");
+        output.print(odometry.getRelativeAngle() * 180.0f / PI, 1);
+        output.println("Â°");
+        
         output.print("Threshold: ");
         output.println(lineSensor.getThreshold());
         output.println("--------------------\n");
+
+        output.print("Control Mode: ");
+        output.println(robot.isPIDControlEnabled() ? "PID (closed-loop)" : "DIRECT (open-loop)");
     }
     else if (cmd == "sensors") {
         lineSensor.read();
@@ -161,6 +208,98 @@ void processCommand(String cmd) {
             case JUNCTION_LOST: output.println("LOST"); break;
         }
     }
+    else if (cmd == "odom") {
+        output.print("Position: x=");
+        output.print(odometry.getX(), 3);
+        output.print("m y=");
+        output.print(odometry.getY(), 3);
+        output.print("m Î¸=");
+        output.print(odometry.getTheta() * 180.0f / PI, 1);
+        output.println("Â°");
+        
+        output.print("Velocity: v=");
+        output.print(odometry.getVelocity(), 3);
+        output.print("m/s w=");
+        output.print(odometry.getAngularVelocity(), 2);
+        output.println("rad/s");
+        
+        output.print("Relative: dist=");
+        output.print(odometry.getRelativeDistance(), 3);
+        output.print("m angle=");
+        output.print(odometry.getRelativeAngle() * 180.0f / PI, 1);
+        output.println("Â°");
+        
+        output.print("Encoders: L=");
+        output.print(odometry.getLeftEncoder());
+        output.print(" R=");
+        output.println(odometry.getRightEncoder());
+    }
+    else if (cmd == "resetodom") {
+        odometry.reset();
+        output.println(">>> Odometry RESET to zero");
+    }
+    else if (cmd.startsWith("vel ")) {
+        int space = cmd.indexOf(' ', 4);
+        if (space > 0) {
+            float v = cmd.substring(4, space).toFloat();
+            float w = cmd.substring(space + 1).toFloat();
+            
+            // Switch to velocity control mode if not already
+            if (robot.getMode() != MODE_VELOCITY_CONTROL) {
+                robot.setMode(MODE_VELOCITY_CONTROL);
+                output.println(">>> Switched to VELOCITY_CONTROL mode");
+            }
+            
+            robot.setVelocity(v, w);
+            output.print(">>> Velocity set: v=");
+            output.print(v, 3);
+            output.print(" m/s, w=");
+            output.print(w, 3);
+            output.println(" rad/s");
+            
+            // Show what this means
+            if (v > 0) output.print("    (Moving FORWARD");
+            else if (v < 0) output.print("    (Moving BACKWARD");
+            else output.print("    (STOPPED");
+            
+            if (w > 0) output.println(" while turning RIGHT)");
+            else if (w < 0) output.println(" while turning LEFT)");
+            else output.println(")");
+        }
+        else {
+            output.println(">>> Usage: vel <v> <w>");
+            output.println("    v = linear velocity (m/s)");
+            output.println("    w = angular velocity (rad/s)");
+            output.println("    Example: vel 0.2 0    (forward at 0.2 m/s)");
+            output.println("    Example: vel 0 0.5    (spin right at 0.5 rad/s)");
+            output.println("    Example: vel 0.1 -0.3 (forward + turn left)");
+        }
+    }
+    else if (cmd.startsWith("forward ")) {
+        float distance = cmd.substring(8).toFloat();
+        robot.gotoDistance(distance);
+        output.print(">>> Moving ");
+        if (distance >= 0) {
+            output.print("FORWARD ");
+        } else {
+            output.print("BACKWARD ");
+        }
+        output.print(fabs(distance) * 100.0f, 1);
+        output.println(" cm");
+    }
+    else if (cmd.startsWith("turn ")) {
+        float degrees = cmd.substring(5).toFloat();
+        float radians = degrees * PI / 180.0f;
+        robot.gotoAngle(radians);
+        output.print(">>> Turning ");
+        if (degrees >= 0) {
+            output.print("RIGHT ");
+        } else {
+            output.print("LEFT ");
+        }
+        output.print(fabs(degrees), 1);
+        output.println("Â°");
+    }
     else if (cmd.startsWith("stream ")) {
         String option = cmd.substring(7);
         if (option == "on") {
@@ -169,6 +308,16 @@ void processCommand(String cmd) {
         } else if (option == "off") {
             sensorStreamEnabled = false;
             output.println(">>> Sensor stream DISABLED");
+        }
+    }
+    else if (cmd.startsWith("ostream ")) {
+        String option = cmd.substring(8);
+        if (option == "on") {
+            odomStreamEnabled = true;
+            output.println(">>> Odometry stream ENABLED");
+        } else if (option == "off") {
+            odomStreamEnabled = false;
+            output.println(">>> Odometry stream DISABLED");
         }
     }
     else if (cmd == "calibrate") {
@@ -203,8 +352,18 @@ void processCommand(String cmd) {
                 robot.setMode(MODE_MAZE_SOLVE);
                 output.println(">>> Mode: MAZE_SOLVE");
                 break;
+            case 4:
+                robot.setMode(MODE_VELOCITY_CONTROL);
+                output.println(">>> Mode: VELOCITY_CONTROL");
+                output.println("    Use 'vel <v> <w>' to control");
+                output.println("    v = linear velocity (m/s)");
+                output.println("    w = angular velocity (rad/s)");
+                break;
             default:
-                output.println(">>> ERROR: Invalid mode (use 1 or 3)");
+                output.println(">>> ERROR: Invalid mode");
+                output.println("    1 = LINE_FOLLOW");
+                output.println("    3 = MAZE_SOLVE");
+                output.println("    4 = VELOCITY_CONTROL");
         }
     }
     else if (cmd.startsWith("pid ")) {
@@ -254,6 +413,75 @@ void processCommand(String cmd) {
             output.println(">>> Usage: motors <left> <right>");
         }
     }
+    // ============================================================================
+// ADICIONE ESTES COMANDOS NA FUNÃ‡ÃƒO processCommand() do main.cpp
+// ============================================================================
+
+    else if (cmd.startsWith("velpid ")) {
+        // Formato: velpid <kp_v> <ki_v> <kd_v> <kp_w> <ki_w> <kd_w>
+        int spaces[5];
+        int spaceCount = 0;
+        int pos = 7;
+        
+        while (spaceCount < 5 && pos < cmd.length()) {
+            pos = cmd.indexOf(' ', pos);
+            if (pos > 0) {
+                spaces[spaceCount++] = pos;
+                pos++;
+            } else {
+                break;
+            }
+        }
+        
+        if (spaceCount == 5) {
+            float kp_v = cmd.substring(7, spaces[0]).toFloat();
+            float ki_v = cmd.substring(spaces[0] + 1, spaces[1]).toFloat();
+            float kd_v = cmd.substring(spaces[1] + 1, spaces[2]).toFloat();
+            float kp_w = cmd.substring(spaces[2] + 1, spaces[3]).toFloat();
+            float ki_w = cmd.substring(spaces[3] + 1, spaces[4]).toFloat();
+            float kd_w = cmd.substring(spaces[4] + 1).toFloat();
+            
+            robot.setVelocityPID(kp_v, ki_v, kd_v, kp_w, ki_w, kd_w);
+            
+            output.println(">>> Velocity PID updated:");
+            output.print("    Linear  (v): Kp=");
+            output.print(kp_v, 1);
+            output.print(" Ki=");
+            output.print(ki_v, 1);
+            output.print(" Kd=");
+            output.println(kd_v, 1);
+            output.print("    Angular (w): Kp=");
+            output.print(kp_w, 1);
+            output.print(" Ki=");
+            output.print(ki_w, 1);
+            output.print(" Kd=");
+            output.println(kd_w, 1);
+        }
+        else {
+            output.println(">>> Usage: velpid <kp_v> <ki_v> <kd_v> <kp_w> <ki_w> <kd_w>");
+            output.println("    Example: velpid 50 10 5 20 2 1");
+            output.println("    Current defaults:");
+            output.println("      Linear  (v): Kp=50  Ki=10  Kd=5");
+            output.println("      Angular (w): Kp=20  Ki=2   Kd=1");
+            output.println("    NOTE: Gains are in m/s and rad/s units");
+        }
+    }
+    else if (cmd.startsWith("pidmode ")) {
+        String mode = cmd.substring(8);
+        if (mode == "on" || mode == "1" || mode == "true") {
+            robot.setPIDControlMode(true);
+            output.println(">>> PID velocity control ENABLED (closed-loop)");
+            output.println("    Uses odometry feedback for accurate control");
+        } else if (mode == "off" || mode == "0" || mode == "false") {
+            robot.setPIDControlMode(false);
+            output.println(">>> Direct velocity control ENABLED (open-loop)");
+            output.println("    Converts v/w directly to PWM (no feedback)");
+        } else {
+            output.println(">>> Usage: pidmode <on|off>");
+            output.print("    Current: ");
+            output.println(robot.isPIDControlEnabled() ? "PID (on)" : "DIRECT (off)");
+        }
+    }
     else if (cmd.length() > 0) {
         output.println(">>> Unknown command. Type 'help' for list.");
     }
@@ -275,10 +503,14 @@ void setup() {
     digitalWrite(LED_BUILTIN, LOW);
     
     Serial.println("\n========================================");
-    Serial.println(" LINE FOLLOWING ROBOT - DUAL CONTROL");
+    Serial.println(" LINE FOLLOWING ROBOT - WITH ODOMETRY");
     Serial.println("   Serial + WiFi Terminal");
     Serial.println("   Raspberry Pi Pico W + L298N");
     Serial.println("========================================\n");
+    
+    // Initialize odometry (encoders)
+    Serial.println("[INIT] Setting up odometry...");
+    odometry.begin();
     
     // Initialize WiFi terminal
     if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
@@ -300,6 +532,10 @@ void setup() {
     Serial.println("   SETUP COMPLETE - READY!");
     Serial.println("========================================");
     Serial.println("Type 'help' for available commands");
+    Serial.println("\nNOTE: Robot now uses ODOMETRY for turns");
+    Serial.println("Calibrate wheel parameters if needed:");
+    Serial.println("  WHEEL_DISTANCE = " + String(WHEEL_DISTANCE, 4) + " m");
+    Serial.println("  WHEEL_RADIUS = " + String(WHEEL_RADIUS, 4) + " m");
     Serial.println();
     Serial.print("> ");
 }
@@ -317,11 +553,11 @@ void loop() {
     terminal.update();
     
     // ========================================================================
-    // CONTROL LOOP (15ms ≈ 67 Hz)
+    // CONTROL LOOP (20ms â‰ˆ 50 Hz)
     // ========================================================================
     if (currentTime - lastLoopTime >= CONTROL_LOOP_MS) {
         lastLoopTime = currentTime;
-        robot.update();
+        robot.update();  // This now includes odometry update
     }
     
     // ========================================================================
@@ -348,7 +584,7 @@ void loop() {
     }
     
     // ========================================================================
-    // STATUS OUTPUT (1 second)
+    // STATUS OUTPUT (20ms)
     // ========================================================================
     if (currentTime - lastStatusTime >= 20) {
         lastStatusTime = currentTime;
@@ -371,7 +607,34 @@ void loop() {
             output.print("] L=");
             output.print(leftMotor.getSpeed());
             output.print(" R=");
-            output.println(rightMotor.getSpeed());
+            output.print(rightMotor.getSpeed());
+            
+            // Show relative odometry during turns and tests
+            if (currentState == STATE_TURN_LEFT || 
+                currentState == STATE_TURN_RIGHT || 
+                currentState == STATE_TURN_AROUND ||
+                currentState == STATE_SMALL_FORWARD ||
+                currentState == STATE_VELOCITY_CONTROL ||
+                currentState == STATE_GOTO_DISTANCE ||
+                currentState == STATE_GOTO_ANGLE) {
+                output.print(" [Î¸=");
+                output.print(odometry.getRelativeAngle() * 180.0f / PI, 0);
+                output.print("Â° d=");
+                output.print(odometry.getRelativeDistance(), 2);
+                output.print("m]");
+                
+                // For velocity control, show actual velocities
+                if (currentState == STATE_VELOCITY_CONTROL ||
+                    currentState == STATE_GOTO_DISTANCE ||
+                    currentState == STATE_GOTO_ANGLE) {
+                    output.print(" v=");
+                    output.print(odometry.getVelocity(), 2);
+                    output.print(" w=");
+                    output.print(odometry.getAngularVelocity(), 2);
+                }
+            }
+            
+            output.println();
         }
     }
     
@@ -395,5 +658,21 @@ void loop() {
         output.print(lineSensor.getDigitalSensorValue(1) ? "B" : "W");
         output.print("|P:");
         output.println(lineSensor.getPosition());
+    }
+    
+    // ========================================================================
+    // ODOMETRY STREAM (200ms)
+    // ========================================================================
+    if (odomStreamEnabled && currentTime - lastSensorPrintTime >= 200) {
+        output.print("O: x=");
+        output.print(odometry.getX(), 2);
+        output.print(" y=");
+        output.print(odometry.getY(), 2);
+        output.print(" Î¸=");
+        output.print(odometry.getTheta() * 180.0f / PI, 0);
+        output.print("Â° | v=");
+        output.print(odometry.getVelocity(), 2);
+        output.print(" w=");
+        output.println(odometry.getAngularVelocity(), 1);
     }
 }
