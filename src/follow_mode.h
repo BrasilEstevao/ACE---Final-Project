@@ -1,32 +1,26 @@
 /* Maze solver - Finite State Machine (RobotStateMachine style)
    NO motor control, NO PID - just state transitions */
 
-#ifndef MAZE_SOLVER_H
-#define MAZE_SOLVER_H
+#ifndef FOLLOW_MODE_H
+#define FOLLOW_MODE_H
 
 #include <Arduino.h>
 #include "LineSensor.h"
 
-// Maze solving states
+// Follow line states
 typedef enum {
-  MAZE_IDLE,
-  MAZE_FOLLOWING,
-  MAZE_JUNCTION_DETECTED,
-  MAZE_SMALL_FORWARD,
-  MAZE_TURNING_LEFT,
-  MAZE_TURNING_RIGHT,
-  MAZE_TURNING_AROUND,
-  MAZE_FINISHED,
-  MAZE_LOST
-} MazeState;
+  FOLLOW_IDLE,
+  FOLLOW_LINE,
+  FOLLOW_TURN_AROUND,
+} FollowState;
 
-class MazeMode {
+class FollowMode {
 public:
   // ========================================================================
   // STATE MACHINE VARIABLES
   // ========================================================================
-  MazeState state;           // Current state
-  MazeState last_state;      // Previous state
+  FollowState state;           // Current state
+  FollowState last_state;      // Previous state
   
   unsigned long tes;         // Time Entering State (ms)
   unsigned long tis;         // Time In State (ms)
@@ -36,23 +30,18 @@ public:
   // ========================================================================
   // CONSTRUCTOR
   // ========================================================================
-  MazeMode();
+  FollowMode();
   
   // ========================================================================
-  // MAIN UPDATE (call every control loop)
+  // MAIN UPDATE 
   // ========================================================================
   void update(JunctionType current_junction, float rel_angle, float rel_dist);
   
   // ========================================================================
-  // STATE OUTPUTS (what main loop should do based on state)
+  // STATE OUTPUTS 
   // ========================================================================
   bool shouldFollowLine();
-  bool shouldGoForward();     // Small forward before turn
-  bool shouldTurnLeft();
-  bool shouldTurnRight();
   bool shouldTurnAround();
-  bool isFinished();
-  bool isLost();
   
   // ========================================================================
   // CONTROL
@@ -64,7 +53,7 @@ public:
   // ========================================================================
   // GETTERS
   // ========================================================================
-  MazeState getState();
+  FollowState getState();
   unsigned long getTimeInState();
   
 private:
@@ -73,19 +62,14 @@ private:
   // ========================================================================
   unsigned long state_entry_time;
   
-  void changeState(MazeState new_state);
+  void changeState(FollowState new_state);
   
   // ========================================================================
-  // STATE TRANSITIONS (one function per state)
+  // STATE TRANSITIONS 
   // ========================================================================
-  MazeState transitionIdle(JunctionType junction);
-  MazeState transitionFollowing(JunctionType junction);
-  MazeState transitionSmallForward(JunctionType junction, float rel_dist);
-  MazeState transitionTurnLeft(JunctionType junction, float rel_angle);
-  MazeState transitionTurnRight(JunctionType junction, float rel_angle);
-  MazeState transitionTurnAround(JunctionType junction, float rel_angle);
-  MazeState transitionLost(JunctionType junction);
-  MazeState transitionFinished();
+  FollowState transitionIdle();
+  FollowState transitionFollowing(JunctionType junction);
+  FollowState transitionTurnAround(JunctionType junction, float rel_angle);
 };
 
-#endif // MAZE_SOLVER_H
+#endif // FOLLOW_MODE_H

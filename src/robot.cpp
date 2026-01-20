@@ -140,36 +140,47 @@ void robot_t::VWToMotorsVoltage(void)
   w1ref = v1ref * wheel_radius;
   w2ref = v2ref * wheel_radius;
 
-  if (control_mode == cm_pwm) {
-    // Direct PWM control 
-    PWM_1 = PWM_1_req;  
-    PWM_2 = PWM_2_req;  
+  switch (control_mode) {
+    case cm_pwm:
+        // Direct PWM control 
+        PWM_1 = PWM_1_req;  
+        PWM_2 = PWM_2_req;  
+        break;
 
-  } else if (control_mode == cm_pid) {
-    // PID velocity control 
-    u1 = 0;
-    u2 = 0;      
+    case cm_pid:
+        // PID velocity control 
+        u1 = 0;
+        u2 = 0;      
 
-    if (v1ref != 0) u1 = PID1.calc(v1ref, v1e);
-    else PID1.Se = 0;
+        if (v1ref != 0) u1 = PID1.calc(v1ref, v1e);
+        else PID1.Se = 0;
 
-    if (v2ref != 0) u2 = PID2.calc(v2ref, v2e);
-    else PID2.Se = 0;
+        if (v2ref != 0) u2 = PID2.calc(v2ref, v2e);
+        else PID2.Se = 0;
 
-    PWM_1 = u1 / battery_voltage * 255;
-    PWM_2 = u2 / battery_voltage * 255;
-    
-  } else if (control_mode == cm_line_follow) {
-    // Line following control 
-    lineFollowControl();
-    
-  } else if (control_mode == cm_goto_distance) {
-    // Navigate distance 
-    gotoDistanceControl();
-    
-  } else if (control_mode == cm_goto_angle) {
-    // Navigate angle 
-    gotoAngleControl();
+        PWM_1 = u1 / battery_voltage * 255;
+        PWM_2 = u2 / battery_voltage * 255;
+        break;
+
+    case cm_line_follow:
+        // Line following control 
+        lineFollowControl();
+        break;
+
+    case cm_goto_distance:
+        // Navigate distance 
+        gotoDistanceControl();
+        break;
+
+    case cm_goto_angle:
+        // Navigate angle 
+        gotoAngleControl();
+        break;
+
+    default:
+        PWM_1 = 0;
+        PWM_2 = 0;
+        break;
   }
 }
 
@@ -236,6 +247,9 @@ void robot_t::gotoDistanceControl()
   
   v_req = speed;
   w_req = 0.0f;
+
+  v = v_req;
+  w = w_req;
   
   control_mode = cm_pid;  // Switch to PID for execution
   VWToMotorsVoltage();    // Recursive call to execute PID
@@ -273,6 +287,9 @@ void robot_t::gotoAngleControl()
  
   v_req = 0.0f;
   w_req = angSpeed;
+
+  v = v_req; 
+  w = w_req;
   
   control_mode = cm_pid;  // Switch to PID for execution
   VWToMotorsVoltage();    // Recursive call to execute PID

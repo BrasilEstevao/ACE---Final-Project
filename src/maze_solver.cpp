@@ -5,7 +5,7 @@
 // CONSTRUCTOR
 // ============================================================================
 
-MazeSolver::MazeSolver()
+MazeMode::MazeMode()
 {
   state = MAZE_IDLE;
   last_state = MAZE_IDLE;
@@ -19,7 +19,7 @@ MazeSolver::MazeSolver()
 // UPDATE - Main state machine loop
 // ============================================================================
 
-void MazeSolver::update(JunctionType current_junction, float rel_angle, float rel_dist)
+void MazeMode::update(JunctionType current_junction, float rel_angle, float rel_dist)
 {
   // Calculate timing
   tis = millis() - state_entry_time;  // Time In State (how long in current state)
@@ -72,13 +72,13 @@ void MazeSolver::update(JunctionType current_junction, float rel_angle, float re
 // STATE TRANSITIONS
 // ============================================================================
 
-MazeState MazeSolver::transitionIdle(JunctionType junction)
+MazeState MazeMode::transitionIdle(JunctionType junction)
 {
   // Wait for start command - no automatic transitions
   return MAZE_IDLE;
 }
 
-MazeState MazeSolver::transitionFollowing(JunctionType junction)
+MazeState MazeMode::transitionFollowing(JunctionType junction)
 {
   switch (junction) {
     case JUNCTION_LEFT:
@@ -107,7 +107,7 @@ MazeState MazeSolver::transitionFollowing(JunctionType junction)
   }
 }
 
-MazeState MazeSolver::transitionSmallForward(JunctionType junction, float rel_dist)
+MazeState MazeMode::transitionSmallForward(JunctionType junction, float rel_dist)
 {
   // TIMEOUT - Safety mechanism (using tis = time in state)
   if (tis > 1000) {
@@ -170,7 +170,7 @@ MazeState MazeSolver::transitionSmallForward(JunctionType junction, float rel_di
   return MAZE_SMALL_FORWARD;
 }
 
-MazeState MazeSolver::transitionTurnLeft(JunctionType junction, float rel_angle)
+MazeState MazeMode::transitionTurnLeft(JunctionType junction, float rel_angle)
 {
   // TIMEOUT - Safety mechanism (using tis = time in state)
   if (tis > 3000) {
@@ -195,7 +195,7 @@ MazeState MazeSolver::transitionTurnLeft(JunctionType junction, float rel_angle)
   return MAZE_TURNING_LEFT;
 }
 
-MazeState MazeSolver::transitionTurnRight(JunctionType junction, float rel_angle)
+MazeState MazeMode::transitionTurnRight(JunctionType junction, float rel_angle)
 {
   // TIMEOUT - Safety mechanism (using tis = time in state)
   if (tis > 3000) {
@@ -220,7 +220,7 @@ MazeState MazeSolver::transitionTurnRight(JunctionType junction, float rel_angle
   return MAZE_TURNING_RIGHT;
 }
 
-MazeState MazeSolver::transitionTurnAround(JunctionType junction, float rel_angle)
+MazeState MazeMode::transitionTurnAround(JunctionType junction, float rel_angle)
 {
   // TIMEOUT - Safety mechanism (using tis = time in state)
   if (tis > 5000) {
@@ -245,7 +245,7 @@ MazeState MazeSolver::transitionTurnAround(JunctionType junction, float rel_angl
   return MAZE_TURNING_AROUND;
 }
 
-MazeState MazeSolver::transitionLost(JunctionType junction)
+MazeState MazeMode::transitionLost(JunctionType junction)
 {
   // Recovery logic could go here
   // For now, timeout back to idle (using tis = time in state)
@@ -257,47 +257,47 @@ MazeState MazeSolver::transitionLost(JunctionType junction)
   return MAZE_LOST;
 }
 
-MazeState MazeSolver::transitionFinished()
+MazeState MazeMode::transitionFinished()
 {
   // Stay finished
   return MAZE_FINISHED;
 }
 
 // ============================================================================
-// STATE OUTPUTS (what the state machine tells main to do)
+// STATE OUTPUTS 
 // ============================================================================
 
-bool MazeSolver::shouldFollowLine()
+bool MazeMode::shouldFollowLine()
 {
   return state == MAZE_FOLLOWING;
 }
 
-bool MazeSolver::shouldGoForward()
+bool MazeMode::shouldGoForward()
 {
   return state == MAZE_SMALL_FORWARD;
 }
 
-bool MazeSolver::shouldTurnLeft()
+bool MazeMode::shouldTurnLeft()
 {
   return state == MAZE_TURNING_LEFT;
 }
 
-bool MazeSolver::shouldTurnRight()
+bool MazeMode::shouldTurnRight()
 {
   return state == MAZE_TURNING_RIGHT;
 }
 
-bool MazeSolver::shouldTurnAround()
+bool MazeMode::shouldTurnAround()
 {
   return state == MAZE_TURNING_AROUND;
 }
 
-bool MazeSolver::isFinished()
+bool MazeMode::isFinished()
 {
   return state == MAZE_FINISHED;
 }
 
-bool MazeSolver::isLost()
+bool MazeMode::isLost()
 {
   return state == MAZE_LOST;
 }
@@ -306,7 +306,7 @@ bool MazeSolver::isLost()
 // STATE CHANGE
 // ============================================================================
 
-void MazeSolver::changeState(MazeState new_state)
+void MazeMode::changeState(MazeState new_state)
 {
   if (state != new_state) {
     last_state = state;
@@ -333,19 +333,19 @@ void MazeSolver::changeState(MazeState new_state)
 // CONTROL
 // ============================================================================
 
-void MazeSolver::start()
+void MazeMode::start()
 {
   changeState(MAZE_FOLLOWING);
   Serial.println("[MAZE] Started maze solving");
 }
 
-void MazeSolver::stop()
+void MazeMode::stop()
 {
   changeState(MAZE_IDLE);
   Serial.println("[MAZE] Stopped");
 }
 
-void MazeSolver::reset()
+void MazeMode::reset()
 {
   state = MAZE_IDLE;
   last_state = MAZE_IDLE;
@@ -360,12 +360,12 @@ void MazeSolver::reset()
 // GETTERS
 // ============================================================================
 
-MazeState MazeSolver::getState()
+MazeState MazeMode::getState()
 {
   return state;
 }
 
-unsigned long MazeSolver::getTimeInState()
+unsigned long MazeMode::getTimeInState()
 {
   return tis;  // Time In State
 }

@@ -3,6 +3,7 @@
 #include "config.h"
 #include "robot.h"
 #include "LineSensor.h"
+#include "follow_mode.h"
 #include "maze_solver.h"
 #include "commands.h"
 #include "WiFiTerminal.h"
@@ -117,7 +118,8 @@ void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
 
 robot_t robot;
 LineSensor lineSensor;
-MazeSolver mazeSolver;
+FollowMode followMode;
+MazeMode MazeMode;
 commands_t serial_commands;
 WiFiTerminal terminal;
 
@@ -132,6 +134,7 @@ unsigned long loop_micros;
 // MODE FLAGS
 // ============================================================================
 
+bool follow_mode_active = false;
 bool maze_mode_active = false;
 bool sensor_stream = false;
 bool odom_stream = false;
@@ -208,7 +211,7 @@ void process_command(frame_data_t frame)
     robot.w_req = 0;
     robot.PWM_1 = 0;
     robot.PWM_2 = 0;
-    mazeSolver.stop();
+    MazeMode.stop();
     out.println(">>> STOPPED");
   }
   
@@ -225,7 +228,7 @@ void process_command(frame_data_t frame)
     
     if (maze_mode_active) {
       out.print("Maze: ");
-      switch (mazeSolver.getState()) {
+      switch (MazeMode.getState()) {
         case MAZE_IDLE: out.println("IDLE"); break;
         case MAZE_FOLLOWING: out.println("FOLLOWING"); break;
         case MAZE_SMALL_FORWARD: out.println("SMALL_FWD"); break;
@@ -261,8 +264,14 @@ void process_command(frame_data_t frame)
   
   // Line following
   else if (frame.command_is("follow")) {
+    follow_mode_active = true;
     maze_mode_active = false;
-    robot.control_mode = cm_line_follow;
+    robot.xe = 0;
+    robot.ye = 0;
+    robot.thetae = 0;
+    robot.rel_s = 0;
+    robot.rel_theta = 0;
+    followMode.start();
     out.println(">>> LINE FOLLOWING started");
   }
   
@@ -292,13 +301,13 @@ void process_command(frame_data_t frame)
     robot.thetae = 0;
     robot.rel_s = 0;
     robot.rel_theta = 0;
-    mazeSolver.start();
+    MazeMode.start();
     out.println(">>> MAZE SOLVING started");
   }
   
   else if (frame.command_is("mazestop")) {
     maze_mode_active = false;
-    mazeSolver.stop();
+    MazeMode.stop();
     robot.control_mode = cm_pwm;
     robot.PWM_1 = 0;
     robot.PWM_2 = 0;
@@ -557,28 +566,47 @@ void loop()
     robot.odometry();
     robot.battery_voltage = 7.4;
 
+
+
+    // Follow mode
+    if(follow_mode_active) {
+      JunctionType junction = lineSensor.detectJunction();
+      followMode.update(junction, robot.rel_theta, robot.rel_s);
+      
+      if (followMode.shouldFollowLine()) {
+        out.println("[FOLLOW] Following line");
+        robot.control_mode = cm_line_follow;
+      }
+      else if (followMode.shouldTurnAround()) {
+        out.println("[FOLLOW] U-turn");
+        robot.setGotoAngle(TURN_180_ANGLE);
+      }
+    }
+
+
+
     // Maze solver
     if (maze_mode_active) {
       JunctionType junction = lineSensor.detectJunction();
-      mazeSolver.update(junction, robot.rel_theta, robot.rel_s);
+      MazeMode.update(junction, robot.rel_theta, robot.rel_s);
       
-      if (mazeSolver.shouldFollowLine()) {
+      if (MazeMode.shouldFollowLine()) {
         robot.control_mode = cm_line_follow;
       }
-      else if (mazeSolver.shouldGoForward()) {
+      else if (MazeMode.shouldGoForward()) {
         robot.setRobotVW(0.1f, 0.0f);
         robot.control_mode = cm_pid;
       }
-      else if (mazeSolver.shouldTurnLeft()) {
+      else if (MazeMode.shouldTurnLeft()) {
         robot.setGotoAngle(-TURN_90_ANGLE);
       }
-      else if (mazeSolver.shouldTurnRight()) {
+      else if (MazeMode.shouldTurnRight()) {
         robot.setGotoAngle(TURN_90_ANGLE);
       }
-      else if (mazeSolver.shouldTurnAround()) {
+      else if (MazeMode.shouldTurnAround()) {
         robot.setGotoAngle(TURN_180_ANGLE);
       }
-      else if (mazeSolver.isFinished()) {
+      else if (MazeMode.isFinished()) {
         robot.control_mode = cm_pwm;
         robot.PWM_1 = 0;
         robot.PWM_2 = 0;
