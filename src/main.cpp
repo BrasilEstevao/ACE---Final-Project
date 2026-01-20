@@ -119,7 +119,7 @@ void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
 robot_t robot;
 LineSensor lineSensor;
 FollowMode followMode;
-MazeMode MazeMode;
+MazeSolver MazeSolver;
 commands_t serial_commands;
 WiFiTerminal terminal;
 
@@ -211,7 +211,7 @@ void process_command(frame_data_t frame)
     robot.w_req = 0;
     robot.PWM_1 = 0;
     robot.PWM_2 = 0;
-    MazeMode.stop();
+    MazeSolver.stop();
     out.println(">>> STOPPED");
   }
   
@@ -228,7 +228,7 @@ void process_command(frame_data_t frame)
     
     if (maze_mode_active) {
       out.print("Maze: ");
-      switch (MazeMode.getState()) {
+      switch (MazeSolver.getState()) {
         case MAZE_IDLE: out.println("IDLE"); break;
         case MAZE_FOLLOWING: out.println("FOLLOWING"); break;
         case MAZE_SMALL_FORWARD: out.println("SMALL_FWD"); break;
@@ -301,13 +301,13 @@ void process_command(frame_data_t frame)
     robot.thetae = 0;
     robot.rel_s = 0;
     robot.rel_theta = 0;
-    MazeMode.start();
+    MazeSolver.start();
     out.println(">>> MAZE SOLVING started");
   }
   
   else if (frame.command_is("mazestop")) {
     maze_mode_active = false;
-    MazeMode.stop();
+    MazeSolver.stop();
     robot.control_mode = cm_pwm;
     robot.PWM_1 = 0;
     robot.PWM_2 = 0;
@@ -588,25 +588,25 @@ void loop()
     // Maze solver
     if (maze_mode_active) {
       JunctionType junction = lineSensor.detectJunction();
-      MazeMode.update(junction, robot.rel_theta, robot.rel_s);
+      MazeSolver.update(junction, robot.rel_theta, robot.rel_s);
       
-      if (MazeMode.shouldFollowLine()) {
+      if (MazeSolver.shouldFollowLine()) {
         robot.control_mode = cm_line_follow;
       }
-      else if (MazeMode.shouldGoForward()) {
+      else if (MazeSolver.shouldGoForward()) {
         robot.setRobotVW(0.1f, 0.0f);
         robot.control_mode = cm_pid;
       }
-      else if (MazeMode.shouldTurnLeft()) {
+      else if (MazeSolver.shouldTurnLeft()) {
         robot.setGotoAngle(-TURN_90_ANGLE);
       }
-      else if (MazeMode.shouldTurnRight()) {
+      else if (MazeSolver.shouldTurnRight()) {
         robot.setGotoAngle(TURN_90_ANGLE);
       }
-      else if (MazeMode.shouldTurnAround()) {
+      else if (MazeSolver.shouldTurnAround()) {
         robot.setGotoAngle(TURN_180_ANGLE);
       }
-      else if (MazeMode.isFinished()) {
+      else if (MazeSolver.isFinished()) {
         robot.control_mode = cm_pwm;
         robot.PWM_1 = 0;
         robot.PWM_2 = 0;

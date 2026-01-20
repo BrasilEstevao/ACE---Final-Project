@@ -237,7 +237,7 @@ void robot_t::gotoDistanceControl()
   }
   
   // Calculate speed with deceleration
-  float speed = 0.15f;  // m/s
+  float speed = 0.30f;  // m/s
   if (remaining < 0.10f) {
     speed = 0.05f + (remaining / 0.10f) * 0.10f;
   }
