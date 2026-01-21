@@ -504,7 +504,10 @@ void setup()
   // Sonar
   HCSR04.begin(SONAR_TRIG, SONAR_ECHO);
   Sonar1.setTerminal(&terminal);
-  
+
+  // Follow mode
+  followMode.setSonar(&Sonar1);
+
   // WiFi
   if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
     Serial.println("[OK] WiFi ready");
@@ -592,6 +595,12 @@ void loop()
         out.println("[FOLLOW] Spiraling");
         robot.setRobotVW(-0.05f, 0.0f);  // Spiral out
         robot.control_mode = cm_pid;
+      }
+      else if (followMode.shouldStop()) {
+        out.println("[FOLLOW] Blocked! Stopping.");
+        robot.control_mode = cm_pwm;
+        robot.PWM_1 = 0;
+        robot.PWM_2 = 0;
       }
     }
 
