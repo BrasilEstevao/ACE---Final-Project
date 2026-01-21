@@ -11,7 +11,7 @@
 typedef enum {
   FOLLOW_IDLE,
   FOLLOW_LINE,
-  FOLLOW_TURN_AROUND,
+  FOLLOW_LOST,
 } FollowState;
 
 class FollowMode {
@@ -41,7 +41,7 @@ public:
   // STATE OUTPUTS 
   // ========================================================================
   bool shouldFollowLine();
-  bool shouldTurnAround();
+  bool shouldSpiral();
   
   // ========================================================================
   // CONTROL
@@ -69,7 +69,7 @@ private:
   // ========================================================================
   FollowState transitionIdle();
   FollowState transitionFollowing(JunctionType junction);
-  FollowState transitionTurnAround(JunctionType junction, float rel_angle);
+  FollowState transitionLost(JunctionType junction, float rel_angle);
 };
 
 #endif // FOLLOW_MODE_H

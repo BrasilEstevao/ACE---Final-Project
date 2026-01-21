@@ -578,14 +578,6 @@ void loop()
 
     // Distance sensor
     Sonar1.update();
-    // out.print("Sonar state: ");
-    // out.println(Sonar.getState());
-
-    //print distance
-    // double* distances = HCSR04.measureDistanceCm();
-    // terminal.print("Distance: ");
-    // terminal.print(distances[0], 1);
-    // terminal.println(" cm");
 
     // Follow mode
     if(follow_mode_active) {
@@ -596,9 +588,10 @@ void loop()
         out.println("[FOLLOW] Following line");
         robot.control_mode = cm_line_follow;
       }
-      else if (followMode.shouldTurnAround()) {
-        out.println("[FOLLOW] U-turn");
-        robot.setGotoAngle(TURN_180_ANGLE);
+      else if (followMode.shouldSpiral()) {
+        out.println("[FOLLOW] Spiraling");
+        robot.setRobotVW(-0.05f, 0.0f);  // Spiral out
+        robot.control_mode = cm_pid;
       }
     }
 
@@ -635,6 +628,7 @@ void loop()
     }
 
     // Control
+    robot.accelerationLimit();        // Apply acceleration limits (v_req → v, w_req → w)
     robot.setRobotVW(robot.v_req, robot.w_req);
     robot.VWToMotorsVoltage();
 
