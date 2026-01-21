@@ -16,16 +16,11 @@ RPI_PICO_Timer ITimer1(1);
 
 #define TEST_PIN 27
 
-// Encoder pins defined in config.h
-// Motors pins defined in config.h
-
 volatile int encoder1_pos = 0;
 volatile int encoder2_pos = 0;
 
 int enc1, enc2;
-
 int encoder1_state, encoder2_state;
-
 
 int encoder_table[16] = {0, 1, -1, 0, -1, 0, 0, 1, 1, 0, 0, -1, 0, -1, 1, 0}; 
 
@@ -45,7 +40,7 @@ bool timer_handler(struct repeating_timer *t)
   int next_state, table_input, pins;
   digitalWriteFast(TEST_PIN, 1);
 
-  pins = sio_hw->gpio_in;  // Just one read to get all pins
+  pins = sio_hw->gpio_in;
 
   next_state = pinIsHigh(ENC1_A, pins) << 1;
   next_state |= pinIsHigh(ENC1_B, pins);
@@ -96,22 +91,20 @@ void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
   if (new_PWM < -PWM_max) new_PWM = -PWM_max;
   
   if (new_PWM == 0) {
-    // Motor parado
     digitalWrite(pin_a, LOW);
     digitalWrite(pin_b, LOW);
     analogWrite(pin_en, 0);
   } else if (new_PWM > 0) {
-    // Motor frente
     digitalWrite(pin_a, HIGH);
     digitalWrite(pin_b, LOW);
     analogWrite(pin_en, abs(new_PWM));
   } else {
-    // Motor ré
     digitalWrite(pin_a, LOW);
     digitalWrite(pin_b, HIGH);
     analogWrite(pin_en, abs(new_PWM));
   }
 }
+
 // ============================================================================
 // GLOBAL OBJECTS
 // ============================================================================
@@ -122,6 +115,15 @@ FollowMode followMode;
 MazeSolver MazeSolver;
 commands_t serial_commands;
 WiFiTerminal terminal;
+
+// ============================================================================
+// GLOBAL VARIABLES FOR DEBUG
+// ============================================================================
+
+unsigned long last_maze_update = 0;
+unsigned long last_follow_update = 0;
+MazeState last_printed_maze_state = MAZE_IDLE;
+FollowState last_printed_follow_state = FOLLOW_IDLE;
 
 // ============================================================================
 // TIMING 
@@ -149,12 +151,68 @@ public:
   void println(const char* s) { Serial.println(s); terminal.println(s); }
   void print(String s) { Serial.print(s); terminal.print(s); }
   void println(String s) { Serial.println(s); terminal.println(s); }
+  void print(unsigned long v) { 
+    Serial.print(v); 
+    terminal.print((int)v);
+  }
+  void println(unsigned long v) { 
+    Serial.println(v); 
+    terminal.println((int)v); 
+  }
   void print(int v) { Serial.print(v); terminal.print(v); }
   void println(int v) { Serial.println(v); terminal.println(v); }
   void print(float v, int d=2) { Serial.print(v,d); terminal.print(v,d); }
   void println(float v, int d=2) { Serial.println(v,d); terminal.println(v,d); }
   void println() { Serial.println(); terminal.println(); }
 } out;
+
+// ============================================================================
+// DEBUG PRINT FUNCTIONS
+// ============================================================================
+
+void printMazeStatus()
+{
+  char posBuf[64];
+  MazeSolver.getPositionString(posBuf, sizeof(posBuf));
+  
+  out.println("\n=== MAZE SOLVER - LEFT-HAND ===");
+  out.print("State: ");
+  out.println(MazeSolver.getStateName());
+  out.print("Position: ");
+  out.println(posBuf);
+  out.print("Time: ");
+  out.print(MazeSolver.getTimeInState());
+  out.println(" ms");
+  
+  if (MazeSolver.stored_junction != JUNCTION_NONE) {
+    out.print("Last junction: ");
+    switch (MazeSolver.stored_junction) {
+      case JUNCTION_LEFT: out.println("LEFT"); break;
+      case JUNCTION_RIGHT: out.println("RIGHT"); break;
+      case JUNCTION_T: out.println("T-JUNCTION"); break;
+      default: break;
+    }
+  }
+  
+  out.println("================================\n");
+}
+
+void printFollowStatus()
+{
+  out.println("\n=== FOLLOW MODE - U-TURN ===");
+  out.print("State: ");
+  
+  switch (followMode.getState()) {
+    case FOLLOW_IDLE: out.println("IDLE"); break;
+    case FOLLOW_LINE: out.println("FOLLOWING"); break;
+    case FOLLOW_TURN_AROUND: out.println("U-TURN"); break;
+  }
+  
+  out.print("Time: ");
+  out.print(followMode.getTimeInState());
+  out.println(" ms");
+  out.println("=============================\n");
+}
 
 // ============================================================================
 // COMMAND PROCESSING
@@ -212,7 +270,6 @@ void process_command(frame_data_t frame)
     robot.w_req = 0;
     robot.PWM_1 = 0;
     robot.PWM_2 = 0;
-    
     followMode.stop();
     MazeSolver.stop();
     out.println(">>> STOPPED");
@@ -265,7 +322,6 @@ void process_command(frame_data_t frame)
     out.println("--------------\n");
   }
   
-  // Line following
   else if (frame.command_is("follow")) {
     follow_mode_active = true;
     maze_mode_active = false;
@@ -296,9 +352,9 @@ void process_command(frame_data_t frame)
     out.println((int)frame.value);
   }
   
-  // Maze solving
   else if (frame.command_is("maze")) {
     maze_mode_active = true;
+    follow_mode_active = false;
     robot.xe = 0;
     robot.ye = 0;
     robot.thetae = 0;
@@ -317,7 +373,6 @@ void process_command(frame_data_t frame)
     out.println(">>> MAZE stopped");
   }
   
-  // Navigation
   else if (frame.command_is("forward")) {
     robot.setGotoDistance(frame.value);
     out.print(">>> Moving ");
@@ -344,7 +399,6 @@ void process_command(frame_data_t frame)
     out.println(w, 3);
   }
   
- 
   else if (frame.command_is("m1")) {
     robot.PWM_1_req = frame.value;
     robot.control_mode = cm_pwm;
@@ -392,7 +446,6 @@ void process_command(frame_data_t frame)
     out.println(frame.value, 2);
   }
   
-  // Sensors
   else if (frame.command_is("sensors")) {
     lineSensor.printValues();
   }
@@ -417,7 +470,6 @@ void process_command(frame_data_t frame)
     out.println(">>> Complete");
   }
   
-  // Odometry
   else if (frame.command_is("odom")) {
     out.print("x=");
     out.print(robot.xe, 3);
@@ -460,52 +512,42 @@ void process_command(frame_data_t frame)
 
 void setup() 
 {
-  // Pins
   pinMode(ENC1_A, INPUT_PULLUP);
   pinMode(ENC1_B, INPUT_PULLUP);
   pinMode(ENC2_A, INPUT_PULLUP);
   pinMode(ENC2_B, INPUT_PULLUP);
-
   pinMode(TEST_PIN, OUTPUT);
-
   pinMode(MOTOR1_IN1, OUTPUT);
   pinMode(MOTOR1_IN2, OUTPUT);
   pinMode(MOTOR1_EN, OUTPUT);
-  
- 
   pinMode(MOTOR2_IN3, OUTPUT);
   pinMode(MOTOR2_IN4, OUTPUT);
   pinMode(MOTOR2_EN, OUTPUT);
-  
 
-  // Commands
   serial_commands.init(process_command);
 
-  // Serial
   Serial.begin(115200);
   delay(2000);
 
   Serial.println("\n========================================");
-  Serial.println(" LINE ROBOT");
+  Serial.println(" LINE ROBOT - LEFT-HAND RULE");
   Serial.println("========================================\n");
 
-  // Start timer interrupt (40kHz = 25µs period)
   if (ITimer1.attachInterrupt(40000, timer_handler))
     Serial.println("[OK] Timer interrupt started");
   else
     Serial.println("[ERROR] Timer failed");
 
-  // Initialize robot
   robot.setLineSensor(&lineSensor);
+
+  MazeSolver.setTerminal(&terminal);
   
-  // WiFi
   if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
     Serial.println("[OK] WiFi ready");
     Serial.print("IP: ");
     Serial.println(terminal.getIP());
   }
 
-  // Timing 
   interval = CONTROL_LOOP_MS;
   robot.dt = interval / 1000.0f;
   robot.PID1.dt = robot.dt;
@@ -517,20 +559,21 @@ void setup()
   Serial.print("> ");
 }
 
+// ============================================================================
+// MAIN LOOP
+// ============================================================================
+
 void loop() 
 {
   unsigned long now = millis();
   
-  // WiFi update
   terminal.update();
   
-  // Serial commands
   if (Serial.available()) {
     uint8_t b = Serial.read();
     serial_commands.process_char(b);
   }
   
-  // WiFi commands
   String wifi_cmd = terminal.readLine();
   if (wifi_cmd.length() > 0) {
     frame_data_t frame;
@@ -553,46 +596,71 @@ void loop()
     process_command(frame);
   }
   
-  // Control loop 
+  // ========================================================================
+  // CONTROL LOOP (40ms = 25Hz)
+  // ========================================================================
   if (now - last_cycle > interval) {
     loop_micros = micros();
     last_cycle += interval;
 
-    // Read sensors
     read_encoders();
     lineSensor.read();
     
     robot.enc1 = enc1;
     robot.enc2 = enc2;
     
-    // Odometry 
     robot.odometry();
     robot.battery_voltage = 7.4;
 
-
-
-    // Follow mode
-    if(follow_mode_active) {
+    // ======================================================================
+    // FOLLOW MODE
+    // ======================================================================
+    if (follow_mode_active) {
       JunctionType junction = lineSensor.detectJunction();
+      FollowState prev_follow_state = followMode.getState();
+      
       followMode.update(junction, robot.rel_theta, robot.rel_s);
       
+      // Print status on state change or every 2 seconds
+      if (followMode.getState() != last_printed_follow_state || 
+          now - last_follow_update > 2000) {
+        printFollowStatus();
+        last_printed_follow_state = followMode.getState();
+        last_follow_update = now;
+      }
+      
+      // Reset relative angle when entering U-turn
+      if (prev_follow_state != FOLLOW_TURN_AROUND && 
+          followMode.getState() == FOLLOW_TURN_AROUND) {
+        robot.resetRelative();
+        out.println("[FOLLOW] Starting U-turn...");
+      }
+      
       if (followMode.shouldFollowLine()) {
-        out.println("[FOLLOW] Following line");
         robot.control_mode = cm_line_follow;
       }
       else if (followMode.shouldTurnAround()) {
-        out.println("[FOLLOW] U-turn");
         robot.setGotoAngle(TURN_180_ANGLE);
       }
     }
 
-
-
-    // Maze solver
+    // ======================================================================
+    // MAZE SOLVER - LEFT-HAND RULE
+    // ======================================================================
     if (maze_mode_active) {
       JunctionType junction = lineSensor.detectJunction();
+      MazeState prev_state = MazeSolver.getState();
+      
+      // Update maze solver
       MazeSolver.update(junction, robot.rel_theta, robot.rel_s);
       
+      if (prev_state != MAZE_SMALL_FORWARD && 
+          MazeSolver.getState() == MAZE_SMALL_FORWARD) {
+        robot.resetRelative();
+        out.println("[MAZE] Reset rel_s for small forward");
+      }
+      
+      // Apply outputs
       if (MazeSolver.shouldFollowLine()) {
         robot.control_mode = cm_line_follow;
       }
@@ -616,17 +684,35 @@ void loop()
         maze_mode_active = false;
         out.println("\n>>> MAZE SOLVED!");
       }
+    } 
+
+    // ======================================================================
+    // MOTOR CONTROL LOGIC
+    // ======================================================================
+    if (robot.control_mode == cm_goto_distance) {
+        robot.gotoDistanceControl(); 
+    }
+    else if (robot.control_mode == cm_goto_angle) {
+        robot.gotoAngleControl();
+    }
+    else if (robot.control_mode == cm_line_follow) {
+        robot.lineFollowControl();
+    }
+    else {
+        robot.v = robot.v_req;
+        robot.w = robot.w_req;
+        robot.VWToMotorsVoltage();
     }
 
-    // Control
-    robot.setRobotVW(robot.v_req, robot.w_req);
-    robot.VWToMotorsVoltage();
-
-    // Motors
+    // ======================================================================
+    // APPLY TO MOTORS
+    // ======================================================================
     setMotorPWM(robot.PWM_1, MOTOR1_IN1, MOTOR1_IN2, MOTOR1_EN);
     setMotorPWM(robot.PWM_2, MOTOR2_IN3, MOTOR2_IN4, MOTOR2_EN);
 
-    // Streaming
+    // ======================================================================
+    // STREAMING
+    // ======================================================================
     if (sensor_stream) {
       out.print("S: ");
       out.print(lineSensor.getDigitalSensorValue(0) ? "B" : "W");
@@ -654,5 +740,5 @@ void loop()
       out.print(" w=");
       out.println(robot.we, 1);
     }
-  }
-}
+  } 
+} 

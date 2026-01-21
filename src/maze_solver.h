@@ -1,13 +1,26 @@
-/* Maze solver - Finite State Machine (RobotStateMachine style)
-   NO motor control, NO PID - just state transitions */
+/* Maze solver - LEFT-HAND RULE Algorithm
+   Finite State Machine + Position Tracking */
 
 #ifndef MAZE_SOLVER_H
 #define MAZE_SOLVER_H
 
 #include <Arduino.h>
 #include "LineSensor.h"
+#include "WifiTerminal.h"
 
-// Maze solving states
+// ============================================================================
+// DIRECTIONS (Absolute)
+// ============================================================================
+typedef enum {
+  DIR_NORTH = 0,  // UP (initial direction)
+  DIR_EAST = 1,   // RIGHT
+  DIR_SOUTH = 2,  // DOWN
+  DIR_WEST = 3    // LEFT
+} Direction;
+
+// ============================================================================
+// MAZE SOLVING STATES
+// ============================================================================
 typedef enum {
   MAZE_IDLE,
   MAZE_FOLLOWING,
@@ -20,6 +33,9 @@ typedef enum {
   MAZE_LOST
 } MazeState;
 
+// ============================================================================
+// MAZE SOLVER CLASS
+// ============================================================================
 class MazeSolver {
 public:
   // ========================================================================
@@ -32,16 +48,13 @@ public:
   unsigned long tis;         // Time In State (ms)
   
   JunctionType stored_junction;  // Stored junction for decision making
-
-  int x;
-  int y;
-
-  typedef enum {
-    UP,
-    RIGHT,
-    DOWN,
-    LEFT
-  } Direction;
+  
+  // ========================================================================
+  // POSITION TRACKING
+  // ========================================================================
+  int x;                     // Current X position in grid
+  int y;                     // Current Y position in grid
+  Direction currentDir;      // Current absolute direction
   
   // ========================================================================
   // CONSTRUCTOR
@@ -76,14 +89,26 @@ public:
   // ========================================================================
   MazeState getState();
   unsigned long getTimeInState();
+  void printPosition();
+  void setTerminal(WiFiTerminal* terminal) { _terminal = terminal; }
+  
+  // ========================================================================
+  // DEBUG OUTPUT (call from main to print via WiFi)
+  // ========================================================================
+  const char* getStateName();
+  const char* getDirectionName();
+  void getPositionString(char* buffer, size_t bufferSize);
   
 private:
   // ========================================================================
   // INTERNAL STATE MANAGEMENT
   // ========================================================================
   unsigned long state_entry_time;
+
+  WiFiTerminal* _terminal;
   
   void changeState(MazeState new_state);
+  
   
   // ========================================================================
   // STATE TRANSITIONS (one function per state)
@@ -96,6 +121,17 @@ private:
   MazeState transitionTurnAround(JunctionType junction, float rel_angle);
   MazeState transitionLost(JunctionType junction);
   MazeState transitionFinished();
+  
+  // ========================================================================
+  // LEFT-HAND RULE DECISION LOGIC
+  // ========================================================================
+  MazeState decideDirection(JunctionType junction);
+  
+  // ========================================================================
+  // POSITION TRACKING
+  // ========================================================================
+  void updatePosition();
+  void updateDirection(MazeState nextState);
 };
 
 #endif // MAZE_SOLVER_H

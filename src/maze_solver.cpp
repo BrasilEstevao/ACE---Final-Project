@@ -11,11 +11,13 @@ MazeSolver::MazeSolver()
   last_state = MAZE_IDLE;
   stored_junction = JUNCTION_NONE;
   state_entry_time = 0;
-  tes = 0;  // Time Entering State
-  tis = 0;  // Time In State
+  tes = 0;
+  tis = 0;
+  
+  // Start at origin facing NORTH
   x = 0;
   y = 0;
-  Direction dir = UP;
+  currentDir = DIR_NORTH;
 }
 
 // ============================================================================
@@ -25,8 +27,8 @@ MazeSolver::MazeSolver()
 void MazeSolver::update(JunctionType current_junction, float rel_angle, float rel_dist)
 {
   // Calculate timing
-  tis = millis() - state_entry_time;  // Time In State (how long in current state)
-  tes = millis();                      // Time Entering State (absolute time)
+  tis = millis() - state_entry_time;
+  tes = millis();
   
   // STATE TRANSITIONS
   MazeState next_state = state;
@@ -53,7 +55,7 @@ void MazeSolver::update(JunctionType current_junction, float rel_angle, float re
       break;
       
     case MAZE_TURNING_AROUND:
-      next_state = transitionTurnAround(current_junction, rel_angle);
+      next_state = transitionTurnAround(current_junction,rel_angle);
       break;
       
     case MAZE_LOST:
@@ -65,8 +67,9 @@ void MazeSolver::update(JunctionType current_junction, float rel_angle, float re
       break;
   }
   
-  // Change state if needed
+  // Update direction based on state change
   if (next_state != state) {
+    updateDirection(next_state);
     changeState(next_state);
   }
 }
@@ -77,7 +80,6 @@ void MazeSolver::update(JunctionType current_junction, float rel_angle, float re
 
 MazeState MazeSolver::transitionIdle(JunctionType junction)
 {
-  // Wait for start command - no automatic transitions
   return MAZE_IDLE;
 }
 
@@ -85,26 +87,22 @@ MazeState MazeSolver::transitionFollowing(JunctionType junction)
 {
   switch (junction) {
     case JUNCTION_LEFT:
-      stored_junction = junction;
-      Serial.println("[MAZE] Junction detected: LEFT");
-      return MAZE_SMALL_FORWARD;
-      
     case JUNCTION_RIGHT:
-      stored_junction = junction;
-      Serial.println("[MAZE] Junction detected: RIGHT");
-      return MAZE_SMALL_FORWARD;
-      
     case JUNCTION_T:
       stored_junction = junction;
-      Serial.println("[MAZE] Junction detected: T");
+      _terminal->print("[MAZE] Junction detected: ");
+      if (junction == JUNCTION_LEFT) _terminal->println("LEFT");
+      else if (junction == JUNCTION_RIGHT) _terminal->println("RIGHT");
+      else _terminal->println("T");
       return MAZE_SMALL_FORWARD;
-      
+
+    case JUNCTION_NONE:
+      return MAZE_FOLLOWING;
+
     case JUNCTION_LOST:
-      Serial.println("[MAZE] Lost line - turning around");
+      _terminal->println("[MAZE] Lost line - turning around");
       return MAZE_TURNING_AROUND;
       
-    case JUNCTION_NONE:
-    case JUNCTION_CROSS:
     default:
       return MAZE_FOLLOWING;
   }
@@ -112,86 +110,39 @@ MazeState MazeSolver::transitionFollowing(JunctionType junction)
 
 MazeState MazeSolver::transitionSmallForward(JunctionType junction, float rel_dist)
 {
-  // TIMEOUT - Safety mechanism (using tis = time in state)
-  if (tis > 1000) {
-    Serial.println("[MAZE] Small forward TIMEOUT");
-    return MAZE_FOLLOWING;
-  }
-  
-  // Wait until traveled enough distance
-  if (rel_dist < SMALL_FWD_DISTANCE) {
+  if((junction == JUNCTION_LEFT) || (junction == JUNCTION_RIGHT) || (junction == JUNCTION_T) || (rel_dist < SMALL_FWD_DISTANCE)) {
     return MAZE_SMALL_FORWARD;
   }
   
-  Serial.print("[MAZE] Small forward complete (");
-  Serial.print(rel_dist * 100, 1);
-  Serial.println("cm)");
+  _terminal->print("[MAZE] Small forward complete (");
+  _terminal->print(rel_dist * 100, 1);
+  _terminal->println("cm)");
   
-  // Decision tree based on current junction and stored junction
-  switch (junction) {
-    case JUNCTION_T:
-      Serial.println("[MAZE] T-junction found - FINISHED!");
-      return MAZE_FINISHED;
-      
-    case JUNCTION_NONE:
-      // Line found - decide based on stored junction
-      switch (stored_junction) {
-        case JUNCTION_LEFT:
-        case JUNCTION_T:
-          Serial.println("[MAZE] Decision: TURN LEFT");
-          return MAZE_TURNING_LEFT;
-          
-        case JUNCTION_RIGHT:
-        default:
-          Serial.println("[MAZE] Decision: CONTINUE STRAIGHT");
-          return MAZE_FOLLOWING;
-      }
-      break;
-      
-    case JUNCTION_LOST:
-      // No line - must turn
-      switch (stored_junction) {
-        case JUNCTION_LEFT:
-        case JUNCTION_T:
-          Serial.println("[MAZE] No line - TURN LEFT");
-          return MAZE_TURNING_LEFT;
-          
-        case JUNCTION_RIGHT:
-          Serial.println("[MAZE] No line - TURN RIGHT");
-          return MAZE_TURNING_RIGHT;
-          
-        default:
-          Serial.println("[MAZE] No line - TURN AROUND");
-          return MAZE_TURNING_AROUND;
-      }
-      break;
-      
-    default:
-      return MAZE_SMALL_FORWARD;
-  }
+  // Update position (moved forward one cell)
+  updatePosition();
   
-  return MAZE_SMALL_FORWARD;
+  // Apply LEFT-HAND RULE decision
+  return decideDirection(junction);
+
 }
 
 MazeState MazeSolver::transitionTurnLeft(JunctionType junction, float rel_angle)
 {
-  // TIMEOUT - Safety mechanism (using tis = time in state)
-  if (tis > 3000) {
-    Serial.println("[MAZE] Left turn TIMEOUT");
-    return MAZE_FOLLOWING;
-  }
+  // TIMEOUT
+  // if (tis > 3000) {
+  //   _terminal->println("[MAZE] Left turn TIMEOUT");
+  //   updatePosition();
+  //   return MAZE_FOLLOWING;
+  // }
   
   // Check if turned enough AND found line
-  if (fabs(rel_angle) >= TURN_90_ANGLE * 0.9f) {
-    switch (junction) {
-      case JUNCTION_NONE:
-        Serial.print("[MAZE] Left turn complete (");
-        Serial.print(fabs(rel_angle) * 180.0f / PI, 1);
-        Serial.println("°)");
-        return MAZE_FOLLOWING;
-        
-      default:
-        return MAZE_TURNING_LEFT;
+  if (fabs(rel_angle) >= TURN_90_ANGLE) {
+    if (junction == JUNCTION_NONE) {
+      _terminal->print("[MAZE] Left turn complete (");
+      _terminal->print(fabs(rel_angle) * 180.0f / PI, 1);
+      _terminal->println("°)");
+      updatePosition();
+      return MAZE_FOLLOWING;
     }
   }
   
@@ -200,23 +151,21 @@ MazeState MazeSolver::transitionTurnLeft(JunctionType junction, float rel_angle)
 
 MazeState MazeSolver::transitionTurnRight(JunctionType junction, float rel_angle)
 {
-  // TIMEOUT - Safety mechanism (using tis = time in state)
-  if (tis > 3000) {
-    Serial.println("[MAZE] Right turn TIMEOUT");
-    return MAZE_FOLLOWING;
-  }
+  // TIMEOUT
+  // if (tis > 3000) {
+  //   _terminal->println("[MAZE] Right turn TIMEOUT");
+  //   updatePosition();
+  //   return MAZE_FOLLOWING;
+  // }
   
   // Check if turned enough AND found line
-  if (fabs(rel_angle) >= TURN_90_ANGLE * 0.9f) {
-    switch (junction) {
-      case JUNCTION_NONE:
-        Serial.print("[MAZE] Right turn complete (");
-        Serial.print(fabs(rel_angle) * 180.0f / PI, 1);
-        Serial.println("°)");
-        return MAZE_FOLLOWING;
-        
-      default:
-        return MAZE_TURNING_RIGHT;
+  if (fabs(rel_angle) >= TURN_90_ANGLE) {
+    if (junction == JUNCTION_NONE) {
+      _terminal->print("[MAZE] Right turn complete (");
+      _terminal->print(fabs(rel_angle) * 180.0f / PI, 1);
+      _terminal->println("°)");
+      updatePosition();
+      return MAZE_FOLLOWING;
     }
   }
   
@@ -225,23 +174,21 @@ MazeState MazeSolver::transitionTurnRight(JunctionType junction, float rel_angle
 
 MazeState MazeSolver::transitionTurnAround(JunctionType junction, float rel_angle)
 {
-  // TIMEOUT - Safety mechanism (using tis = time in state)
+  // TIMEOUT
   if (tis > 5000) {
-    Serial.println("[MAZE] U-turn TIMEOUT");
-    return MAZE_FOLLOWING;
+    _terminal->println("[MAZE] U-turn TIMEOUT");
+    updatePosition();
+    return MAZE_FINISHED;
   }
   
   // Check if turned enough AND found line
-  if (fabs(rel_angle) >= TURN_180_ANGLE * 0.9f) {
-    switch (junction) {
-      case JUNCTION_NONE:
-        Serial.print("[MAZE] U-turn complete (");
-        Serial.print(fabs(rel_angle) * 180.0f / PI, 1);
-        Serial.println("°)");
-        return MAZE_FOLLOWING;
-        
-      default:
-        return MAZE_TURNING_AROUND;
+  if (fabs(rel_angle) >= TURN_180_ANGLE) {
+    if (junction == JUNCTION_NONE) {
+      _terminal->print("[MAZE] U-turn complete (");
+      _terminal->print(fabs(rel_angle) * 180.0f / PI, 1);
+      _terminal->println("°)");
+      updatePosition();
+      return MAZE_FOLLOWING;
     }
   }
   
@@ -250,24 +197,172 @@ MazeState MazeSolver::transitionTurnAround(JunctionType junction, float rel_angl
 
 MazeState MazeSolver::transitionLost(JunctionType junction)
 {
-  // Recovery logic could go here
-  // For now, timeout back to idle (using tis = time in state)
-  if (tis > 2000) {
-    Serial.println("[MAZE] Lost state timeout");
+  if (tis > 1000) {
+    _terminal->println("[MAZE] Lost state timeout");
     return MAZE_IDLE;
   }
-  
   return MAZE_LOST;
 }
 
 MazeState MazeSolver::transitionFinished()
 {
-  // Stay finished
   return MAZE_FINISHED;
 }
 
 // ============================================================================
-// STATE OUTPUTS 
+// LEFT-HAND RULE DECISION LOGIC
+// ============================================================================
+
+MazeState MazeSolver::decideDirection(JunctionType junction)
+{
+  _terminal->println("\n[MAZE] === LEFT-HAND RULE DECISION ===");
+  
+  // Check what the current junction looks like AFTER small forward
+  switch (junction) {
+
+    case JUNCTION_NONE:
+      // Line continues - decide based on what junction we stored
+      _terminal->print("[MAZE] Line found. Original junction was: ");
+      
+      switch (stored_junction) {
+        case JUNCTION_LEFT:
+          // Had left turn option - LEFT-HAND RULE says TAKE IT
+          _terminal->println("LEFT → Decision: TURN LEFT");
+          return MAZE_TURNING_LEFT;
+          
+        case JUNCTION_T:
+          // Was a T, but now line continues = prioritize LEFT
+          _terminal->println("T → Decision: TURN LEFT");
+          return MAZE_TURNING_LEFT;
+          
+        case JUNCTION_RIGHT:
+          // Had only right turn option - continue straight
+          _terminal->println("RIGHT → Decision: CONTINUE STRAIGHT");
+          return MAZE_FOLLOWING;
+          
+        default:
+          _terminal->println("UNKNOWN → Decision: CONTINUE STRAIGHT");
+          return MAZE_FOLLOWING;
+      }
+      break;
+      
+    case JUNCTION_LOST:
+      // No line after small forward = forced turn
+      _terminal->print("[MAZE] No line! Original junction was: ");
+      
+      switch (stored_junction) {
+        case JUNCTION_LEFT:
+          // Had left option - MUST turn left now
+          _terminal->println("LEFT → Decision: TURN LEFT (forced)");
+          return MAZE_TURNING_LEFT;
+          
+        case JUNCTION_T:
+          // Was a T - LEFT-HAND RULE = go left
+          _terminal->println("T → Decision: TURN LEFT (forced)");
+          return MAZE_TURNING_LEFT;
+          
+        case JUNCTION_RIGHT:
+          // Had only right option - turn right
+          _terminal->println("RIGHT → Decision: TURN RIGHT (forced)");
+          return MAZE_TURNING_RIGHT;
+          
+        default:
+          // Shouldn't happen, but turn around as safety
+          _terminal->println("UNKNOWN → Decision: TURN AROUND");
+          return MAZE_TURNING_AROUND;
+      }
+      break;
+      
+    default:
+      _terminal->println("[MAZE] Unexpected junction state - continuing straight");
+      return MAZE_FOLLOWING;
+  }
+  
+  return MAZE_FOLLOWING;
+}
+
+// ============================================================================
+// POSITION TRACKING
+// ============================================================================
+
+void MazeSolver::updatePosition()
+{
+  // Update grid position based on current direction
+  switch (currentDir) {
+    case DIR_NORTH:
+      y++;
+      _terminal->print("[MAZE] Moved NORTH → ");
+      break;
+    case DIR_EAST:
+      x++;
+      _terminal->print("[MAZE] Moved EAST → ");
+      break;
+    case DIR_SOUTH:
+      y--;
+      _terminal->print("[MAZE] Moved SOUTH → ");
+      break;
+    case DIR_WEST:
+      x--;
+      _terminal->print("[MAZE] Moved WEST → ");
+      break;
+  }
+  
+  printPosition();
+}
+
+void MazeSolver::updateDirection(MazeState nextState)
+{
+  // Update absolute direction based on turn
+  switch (nextState) {
+    case MAZE_TURNING_LEFT:
+      // Counter-clockwise turn
+      currentDir = (Direction)((currentDir + 3) % 4);
+      _terminal->print("[MAZE] Direction changed to: ");
+      break;
+      
+    case MAZE_TURNING_RIGHT:
+      // Clockwise turn
+      currentDir = (Direction)((currentDir + 1) % 4);
+      _terminal->print("[MAZE] Direction changed to: ");
+      break;
+      
+    case MAZE_TURNING_AROUND:
+      // 180° turn
+      currentDir = (Direction)((currentDir + 2) % 4);
+      _terminal->print("[MAZE] Direction changed to: ");
+      break;
+      
+    default:
+      return; // No direction change
+  }
+  
+  // Print new direction
+  switch (currentDir) {
+    case DIR_NORTH: _terminal->println("NORTH"); break;
+    case DIR_EAST:  _terminal->println("EAST"); break;
+    case DIR_SOUTH: _terminal->println("SOUTH"); break;
+    case DIR_WEST:  _terminal->println("WEST"); break;
+  }
+}
+
+void MazeSolver::printPosition()
+{
+  _terminal->print("Position (");
+  _terminal->print(x);
+  _terminal->print(", ");
+  _terminal->print(y);
+  _terminal->print(") facing ");
+  
+  switch (currentDir) {
+    case DIR_NORTH: _terminal->println("NORTH ↑"); break;
+    case DIR_EAST:  _terminal->println("EAST →"); break;
+    case DIR_SOUTH: _terminal->println("SOUTH ↓"); break;
+    case DIR_WEST:  _terminal->println("WEST ←"); break;
+  }
+}
+
+// ============================================================================
+// STATE OUTPUTS
 // ============================================================================
 
 bool MazeSolver::shouldFollowLine()
@@ -315,20 +410,6 @@ void MazeSolver::changeState(MazeState new_state)
     last_state = state;
     state = new_state;
     state_entry_time = millis();
-    
-    // Debug output
-    Serial.print("[MAZE] State: ");
-    switch (new_state) {
-      case MAZE_IDLE: Serial.println("IDLE"); break;
-      case MAZE_FOLLOWING: Serial.println("FOLLOWING"); break;
-      case MAZE_JUNCTION_DETECTED: Serial.println("JUNCTION"); break;
-      case MAZE_SMALL_FORWARD: Serial.println("SMALL_FWD"); break;
-      case MAZE_TURNING_LEFT: Serial.println("TURN_LEFT"); break;
-      case MAZE_TURNING_RIGHT: Serial.println("TURN_RIGHT"); break;
-      case MAZE_TURNING_AROUND: Serial.println("U_TURN"); break;
-      case MAZE_FINISHED: Serial.println("FINISHED"); break;
-      case MAZE_LOST: Serial.println("LOST"); break;
-    }
   }
 }
 
@@ -338,14 +419,23 @@ void MazeSolver::changeState(MazeState new_state)
 
 void MazeSolver::start()
 {
+  // Reset position and direction
+  x = 0;
+  y = 0;
+  currentDir = DIR_NORTH;
+  
   changeState(MAZE_FOLLOWING);
-  Serial.println("[MAZE] Started maze solving");
+  
+  _terminal->println("\n========================================");
+  _terminal->println("[MAZE] STARTED - LEFT-HAND RULE");
+  _terminal->println("[MAZE] Starting position: (0, 0) facing NORTH");
+  _terminal->println("========================================\n");
 }
 
 void MazeSolver::stop()
 {
   changeState(MAZE_IDLE);
-  Serial.println("[MAZE] Stopped");
+  _terminal->println("\n[MAZE] Stopped");
 }
 
 void MazeSolver::reset()
@@ -356,7 +446,11 @@ void MazeSolver::reset()
   state_entry_time = millis();
   tes = 0;
   tis = 0;
-  Serial.println("[MAZE] Reset");
+  x = 0;
+  y = 0;
+  currentDir = DIR_NORTH;
+  
+  _terminal->println("[MAZE] Reset");
 }
 
 // ============================================================================
@@ -370,5 +464,41 @@ MazeState MazeSolver::getState()
 
 unsigned long MazeSolver::getTimeInState()
 {
-  return tis;  // Time In State
+  return tis;
+}
+
+// ============================================================================
+// DEBUG OUTPUT HELPERS
+// ============================================================================
+
+const char* MazeSolver::getStateName()
+{
+  switch (state) {
+    case MAZE_IDLE: return "IDLE";
+    case MAZE_FOLLOWING: return "FOLLOWING";
+    case MAZE_JUNCTION_DETECTED: return "JUNCTION";
+    case MAZE_SMALL_FORWARD: return "SMALL_FWD";
+    case MAZE_TURNING_LEFT: return "TURN_LEFT";
+    case MAZE_TURNING_RIGHT: return "TURN_RIGHT";
+    case MAZE_TURNING_AROUND: return "U_TURN";
+    case MAZE_FINISHED: return "FINISHED";
+    case MAZE_LOST: return "LOST";
+    default: return "UNKNOWN";
+  }
+}
+
+const char* MazeSolver::getDirectionName()
+{
+  switch (currentDir) {
+    case DIR_NORTH: return "NORTH ↑";
+    case DIR_EAST:  return "EAST →";
+    case DIR_SOUTH: return "SOUTH ↓";
+    case DIR_WEST:  return "WEST ←";
+    default: return "UNKNOWN";
+  }
+}
+
+void MazeSolver::getPositionString(char* buffer, size_t bufferSize)
+{
+  snprintf(buffer, bufferSize, "(%d, %d) %s", x, y, getDirectionName());
 }
