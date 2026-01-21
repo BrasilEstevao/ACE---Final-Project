@@ -7,6 +7,8 @@
 #include "maze_solver.h"
 #include "commands.h"
 #include "WiFiTerminal.h"
+#include <HCSR04.h>
+#include "Sonar.h"
 
 // ============================================================================
 // TIMER INTERRUPT
@@ -119,6 +121,7 @@ void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
 robot_t robot;
 LineSensor lineSensor;
 FollowMode followMode;
+Sonar Sonar;
 MazeSolver MazeSolver;
 commands_t serial_commands;
 WiFiTerminal terminal;
@@ -494,6 +497,9 @@ void setup()
 
   // Initialize robot
   robot.setLineSensor(&lineSensor);
+
+  // Sonar
+  HCSR04.begin(SONAR_TRIG, SONAR_ECHO);
   
   // WiFi
   if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
@@ -566,7 +572,16 @@ void loop()
     robot.odometry();
     robot.battery_voltage = 7.4;
 
+    // Distance sensor
+    // Sonar.update();
+    // out.print("Sonar state: ");
+    // out.println(Sonar.getState());
 
+    //print distance
+    double* distances = HCSR04.measureDistanceCm();
+    terminal.print("Distance: ");
+    terminal.print(distances[0], 1);
+    terminal.println(" cm");
 
     // Follow mode
     if(follow_mode_active) {
