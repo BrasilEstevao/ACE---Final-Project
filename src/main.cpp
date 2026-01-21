@@ -176,20 +176,20 @@ public:
 void printMazeStatus()
 {
   char posBuf[64];
-  MazeSolver.getPositionString(posBuf, sizeof(posBuf));
+  Mazesolver.getPositionString(posBuf, sizeof(posBuf));
   
   out.println("\n=== MAZE SOLVER - LEFT-HAND ===");
   out.print("State: ");
-  out.println(MazeSolver.getStateName());
+  out.println(Mazesolver.getStateName());
   out.print("Position: ");
   out.println(posBuf);
   out.print("Time: ");
-  out.print(MazeSolver.getTimeInState());
+  out.print(Mazesolver.getTimeInState());
   out.println(" ms");
   
-  if (MazeSolver.stored_junction != JUNCTION_NONE) {
+  if (Mazesolver.stored_junction != JUNCTION_NONE) {
     out.print("Last junction: ");
-    switch (MazeSolver.stored_junction) {
+    switch (Mazesolver.stored_junction) {
       case JUNCTION_LEFT: out.println("LEFT"); break;
       case JUNCTION_RIGHT: out.println("RIGHT"); break;
       case JUNCTION_T: out.println("T-JUNCTION"); break;
@@ -208,7 +208,8 @@ void printFollowStatus()
   switch (followMode.getState()) {
     case FOLLOW_IDLE: out.println("IDLE"); break;
     case FOLLOW_LINE: out.println("FOLLOWING"); break;
-    case FOLLOW_TURN_AROUND: out.println("U-TURN"); break;
+    case FOLLOW_LOST: out.println("LOST"); break;
+    case FOLLOW_BLOCKED: out.println("BLOCKED"); break;
   }
   
   out.print("Time: ");
@@ -547,7 +548,7 @@ void setup()
   HCSR04.begin(SONAR_TRIG, SONAR_ECHO);
   Sonar1.setTerminal(&terminal);
 
-  MazeSolver.setTerminal(&terminal);
+  Mazesolver.setTerminal(&terminal);
   
   if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
     Serial.println("[OK] WiFi ready");
@@ -661,13 +662,13 @@ void loop()
     // ======================================================================
     if (maze_mode_active) {
       JunctionType junction = lineSensor.detectJunction();
-      MazeState prev_state = MazeSolver.getState();
+      MazeState prev_state = Mazesolver.getState();
       
       // Update maze solver
       Mazesolver.update(junction, robot.rel_theta, robot.rel_s);
       
       if (prev_state != MAZE_SMALL_FORWARD && 
-          MazeSolver.getState() == MAZE_SMALL_FORWARD) {
+          Mazesolver.getState() == MAZE_SMALL_FORWARD) {
         robot.resetRelative();
         out.println("[MAZE] Reset rel_s for small forward");
       }
