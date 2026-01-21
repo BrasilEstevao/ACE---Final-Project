@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "WiFiTerminal.h"
 
 // Sonar states
 
@@ -8,6 +9,9 @@ typedef enum {
 } SonarState;
 
 class Sonar {
+private:
+  WiFiTerminal* _terminal;  // Pointer to terminal
+  
 public:
   // ========================================================================
   // STATE MACHINE VARIABLES
@@ -22,6 +26,8 @@ public:
   // CONSTRUCTOR
   // ========================================================================
   Sonar();
+
+  void setTerminal(WiFiTerminal* terminal) { _terminal = terminal; }
 
   // ========================================================================
   // MAIN UPDATE

@@ -30,31 +30,35 @@ void Sonar::update()
   // Read distance from sonar
   double* distance_cm = HCSR04.measureDistanceCm();
 
+//    _terminal->print("Sonar update called. Distance: ");
+//    _terminal->println(distance_cm[0], 1);
+
   // STATE TRANSITIONS
   SonarState next_state = state;
 
   switch (state) {
     case SONAR_CLEAR:
-      if (*distance_cm < SONAR_OBSTRUCTION_THRESHOLD_CM) {
+      if (distance_cm[0] < SONAR_OBSTRUCTION_THRESHOLD_CM) {
         enter_count++;
         if (enter_count >= ENTER_THRESHOLD) {
           next_state = SONAR_OBSTRUCTED;
           enter_count = 0;  // Reset for next transition
-          
+          _terminal->println("Obstructed!");
         }
-      } else {
+      } else if (enter_count > 0) {
         enter_count--;  // Debounce
       }
       break;
       
     case SONAR_OBSTRUCTED:
-      if (*distance_cm >= SONAR_OBSTRUCTION_THRESHOLD_CM) {
+      if (distance_cm[0] >= SONAR_OBSTRUCTION_THRESHOLD_CM) {
         exit_count++;
         if (exit_count >= EXIT_THRESHOLD) {
           next_state = SONAR_CLEAR;
           exit_count = 0;  // Reset for next transition
+          _terminal->println("Clear!");
         }
-    } else {
+      } else if (exit_count > 0) {
         exit_count--;  // Debounce
       }
       break;

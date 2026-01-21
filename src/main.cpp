@@ -121,8 +121,8 @@ void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
 robot_t robot;
 LineSensor lineSensor;
 FollowMode followMode;
-Sonar Sonar;
-MazeSolver MazeSolver;
+Sonar Sonar1;
+MazeSolver Mazesolver;
 commands_t serial_commands;
 WiFiTerminal terminal;
 
@@ -217,7 +217,7 @@ void process_command(frame_data_t frame)
     robot.PWM_2 = 0;
     
     followMode.stop();
-    MazeSolver.stop();
+    Mazesolver.stop();
     out.println(">>> STOPPED");
   }
   
@@ -234,7 +234,7 @@ void process_command(frame_data_t frame)
     
     if (maze_mode_active) {
       out.print("Maze: ");
-      switch (MazeSolver.getState()) {
+      switch (Mazesolver.getState()) {
         case MAZE_IDLE: out.println("IDLE"); break;
         case MAZE_FOLLOWING: out.println("FOLLOWING"); break;
         case MAZE_SMALL_FORWARD: out.println("SMALL_FWD"); break;
@@ -307,13 +307,13 @@ void process_command(frame_data_t frame)
     robot.thetae = 0;
     robot.rel_s = 0;
     robot.rel_theta = 0;
-    MazeSolver.start();
+    Mazesolver.start();
     out.println(">>> MAZE SOLVING started");
   }
   
   else if (frame.command_is("mazestop")) {
     maze_mode_active = false;
-    MazeSolver.stop();
+    Mazesolver.stop();
     robot.control_mode = cm_pwm;
     robot.PWM_1 = 0;
     robot.PWM_2 = 0;
@@ -503,6 +503,7 @@ void setup()
 
   // Sonar
   HCSR04.begin(SONAR_TRIG, SONAR_ECHO);
+  Sonar1.setTerminal(&terminal);
   
   // WiFi
   if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
@@ -576,15 +577,15 @@ void loop()
     robot.battery_voltage = 7.4;
 
     // Distance sensor
-    // Sonar.update();
+    Sonar1.update();
     // out.print("Sonar state: ");
     // out.println(Sonar.getState());
 
     //print distance
-    double* distances = HCSR04.measureDistanceCm();
-    terminal.print("Distance: ");
-    terminal.print(distances[0], 1);
-    terminal.println(" cm");
+    // double* distances = HCSR04.measureDistanceCm();
+    // terminal.print("Distance: ");
+    // terminal.print(distances[0], 1);
+    // terminal.println(" cm");
 
     // Follow mode
     if(follow_mode_active) {
@@ -606,25 +607,25 @@ void loop()
     // Maze solver
     if (maze_mode_active) {
       JunctionType junction = lineSensor.detectJunction();
-      MazeSolver.update(junction, robot.rel_theta, robot.rel_s);
+      Mazesolver.update(junction, robot.rel_theta, robot.rel_s);
       
-      if (MazeSolver.shouldFollowLine()) {
+      if (Mazesolver.shouldFollowLine()) {
         robot.control_mode = cm_line_follow;
       }
-      else if (MazeSolver.shouldGoForward()) {
+      else if (Mazesolver.shouldGoForward()) {
         robot.setRobotVW(0.1f, 0.0f);
         robot.control_mode = cm_pid;
       }
-      else if (MazeSolver.shouldTurnLeft()) {
+      else if (Mazesolver.shouldTurnLeft()) {
         robot.setGotoAngle(-TURN_90_ANGLE);
       }
-      else if (MazeSolver.shouldTurnRight()) {
+      else if (Mazesolver.shouldTurnRight()) {
         robot.setGotoAngle(TURN_90_ANGLE);
       }
-      else if (MazeSolver.shouldTurnAround()) {
+      else if (Mazesolver.shouldTurnAround()) {
         robot.setGotoAngle(TURN_180_ANGLE);
       }
-      else if (MazeSolver.isFinished()) {
+      else if (Mazesolver.isFinished()) {
         robot.control_mode = cm_pwm;
         robot.PWM_1 = 0;
         robot.PWM_2 = 0;
