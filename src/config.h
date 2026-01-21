@@ -33,7 +33,8 @@
 // ============================================================================
 // ROBOT PHYSICAL PARAMETERS 
 // ============================================================================
-#define WHEEL_DISTANCE  0.105f        // m (distance between wheels)
+//#define WHEEL_DISTANCE  0.105f        // m (distance between wheels)
+#define WHEEL_DISTANCE  0.113f
 #define WHEEL_RADIUS    0.03445f      // m (wheel radius = 68.9mm / 2)
 
 // ============================================================================

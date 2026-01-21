@@ -277,9 +277,9 @@ void robot_t::gotoAngleControl()
   }
   
   // Calculate angular speed with deceleration
-  float angSpeed = 0.8f;  // rad/s
+  float angSpeed = 3.0f;  // rad/s
   if (remaining < 0.35f) {
-    angSpeed = 0.3f + (remaining / 0.35f) * 0.5f;
+    angSpeed = 0.5f + (remaining / 0.35f) * 0.5f;
   }
   
   if (target_angle < 0) angSpeed = -angSpeed;

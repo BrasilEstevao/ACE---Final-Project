@@ -13,6 +13,9 @@ MazeSolver::MazeSolver()
   state_entry_time = 0;
   tes = 0;  // Time Entering State
   tis = 0;  // Time In State
+  x = 0;
+  y = 0;
+  Direction dir = UP;
 }
 
 // ============================================================================

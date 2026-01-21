@@ -206,11 +206,14 @@ void process_command(frame_data_t frame)
   
   else if (frame.command_is("stop")) {
     maze_mode_active = false;
+    follow_mode_active = false;
     robot.control_mode = cm_pwm;
     robot.v_req = 0;
     robot.w_req = 0;
     robot.PWM_1 = 0;
     robot.PWM_2 = 0;
+    
+    followMode.stop();
     MazeSolver.stop();
     out.println(">>> STOPPED");
   }
