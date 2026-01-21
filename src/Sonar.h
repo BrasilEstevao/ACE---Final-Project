@@ -1,3 +1,6 @@
+#ifndef SONAR_H
+#define SONAR_H
+
 #include <Arduino.h>
 #include "WiFiTerminal.h"
 
@@ -63,3 +66,5 @@ private:
 // ============================================================================
 
 #define SONAR_OBSTRUCTION_THRESHOLD_CM   22.0f   // Distance threshold in cm
+
+#endif // SONAR_H
