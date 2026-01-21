@@ -32,6 +32,16 @@ public:
   unsigned long tis;         // Time In State (ms)
   
   JunctionType stored_junction;  // Stored junction for decision making
+
+  int x;
+  int y;
+
+  typedef enum {
+    UP,
+    RIGHT,
+    DOWN,
+    LEFT
+  } Direction;
   
   // ========================================================================
   // CONSTRUCTOR
