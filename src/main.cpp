@@ -7,6 +7,8 @@
 #include "maze_solver.h"
 #include "commands.h"
 #include "WiFiTerminal.h"
+#include <HCSR04.h>
+#include "Sonar.h"
 
 // ============================================================================
 // TIMER INTERRUPT
@@ -112,7 +114,8 @@ void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
 robot_t robot;
 LineSensor lineSensor;
 FollowMode followMode;
-MazeSolver MazeSolver;
+Sonar Sonar1;
+MazeSolver Mazesolver;
 commands_t serial_commands;
 WiFiTerminal terminal;
 
@@ -271,7 +274,7 @@ void process_command(frame_data_t frame)
     robot.PWM_1 = 0;
     robot.PWM_2 = 0;
     followMode.stop();
-    MazeSolver.stop();
+    Mazesolver.stop();
     out.println(">>> STOPPED");
   }
   
@@ -288,7 +291,7 @@ void process_command(frame_data_t frame)
     
     if (maze_mode_active) {
       out.print("Maze: ");
-      switch (MazeSolver.getState()) {
+      switch (Mazesolver.getState()) {
         case MAZE_IDLE: out.println("IDLE"); break;
         case MAZE_FOLLOWING: out.println("FOLLOWING"); break;
         case MAZE_SMALL_FORWARD: out.println("SMALL_FWD"); break;
@@ -360,13 +363,13 @@ void process_command(frame_data_t frame)
     robot.thetae = 0;
     robot.rel_s = 0;
     robot.rel_theta = 0;
-    MazeSolver.start();
+    Mazesolver.start();
     out.println(">>> MAZE SOLVING started");
   }
   
   else if (frame.command_is("mazestop")) {
     maze_mode_active = false;
-    MazeSolver.stop();
+    Mazesolver.stop();
     robot.control_mode = cm_pwm;
     robot.PWM_1 = 0;
     robot.PWM_2 = 0;
@@ -540,6 +543,10 @@ void setup()
 
   robot.setLineSensor(&lineSensor);
 
+  // Sonar
+  HCSR04.begin(SONAR_TRIG, SONAR_ECHO);
+  Sonar1.setTerminal(&terminal);
+
   MazeSolver.setTerminal(&terminal);
   
   if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
@@ -612,6 +619,9 @@ void loop()
     robot.odometry();
     robot.battery_voltage = 7.4;
 
+    // Distance sensor
+    Sonar1.update();    
+    
     // ======================================================================
     // FOLLOW MODE
     // ======================================================================
@@ -639,8 +649,10 @@ void loop()
       if (followMode.shouldFollowLine()) {
         robot.control_mode = cm_line_follow;
       }
-      else if (followMode.shouldTurnAround()) {
-        robot.setGotoAngle(TURN_180_ANGLE);
+      else if (followMode.shouldSpiral()) {
+        out.println("[FOLLOW] Spiraling");
+        robot.setRobotVW(-0.05f, 0.0f);  // Spiral out
+        robot.control_mode = cm_pid;
       }
     }
 
@@ -652,7 +664,7 @@ void loop()
       MazeState prev_state = MazeSolver.getState();
       
       // Update maze solver
-      MazeSolver.update(junction, robot.rel_theta, robot.rel_s);
+      Mazesolver.update(junction, robot.rel_theta, robot.rel_s);
       
       if (prev_state != MAZE_SMALL_FORWARD && 
           MazeSolver.getState() == MAZE_SMALL_FORWARD) {
@@ -661,23 +673,23 @@ void loop()
       }
       
       // Apply outputs
-      if (MazeSolver.shouldFollowLine()) {
+      if (Mazesolver.shouldFollowLine()) {
         robot.control_mode = cm_line_follow;
       }
-      else if (MazeSolver.shouldGoForward()) {
+      else if (Mazesolver.shouldGoForward()) {
         robot.setRobotVW(0.1f, 0.0f);
         robot.control_mode = cm_pid;
       }
-      else if (MazeSolver.shouldTurnLeft()) {
+      else if (Mazesolver.shouldTurnLeft()) {
         robot.setGotoAngle(-TURN_90_ANGLE);
       }
-      else if (MazeSolver.shouldTurnRight()) {
+      else if (Mazesolver.shouldTurnRight()) {
         robot.setGotoAngle(TURN_90_ANGLE);
       }
-      else if (MazeSolver.shouldTurnAround()) {
+      else if (Mazesolver.shouldTurnAround()) {
         robot.setGotoAngle(TURN_180_ANGLE);
       }
-      else if (MazeSolver.isFinished()) {
+      else if (Mazesolver.isFinished()) {
         robot.control_mode = cm_pwm;
         robot.PWM_1 = 0;
         robot.PWM_2 = 0;
@@ -689,6 +701,7 @@ void loop()
     // ======================================================================
     // MOTOR CONTROL LOGIC
     // ======================================================================
+    robot.accelerationLimit();  
     if (robot.control_mode == cm_goto_distance) {
         robot.gotoDistanceControl(); 
     }

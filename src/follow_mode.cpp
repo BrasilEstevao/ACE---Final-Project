@@ -37,8 +37,8 @@ void FollowMode::update(JunctionType current_junction, float rel_angle, float re
       next_state = transitionFollowing(current_junction);
       break;
 
-    case FOLLOW_TURN_AROUND:
-      next_state = transitionTurnAround(current_junction, rel_angle);
+    case FOLLOW_LOST:
+      next_state = transitionLost(current_junction, rel_angle);
       break;
   }
   
@@ -64,7 +64,7 @@ FollowState FollowMode::transitionFollowing(JunctionType junction)
 
     case JUNCTION_LOST:
       Serial.println("[FOLLOW] Lost line - turning around");
-      return FOLLOW_TURN_AROUND;
+      return FOLLOW_LOST;
       
     case JUNCTION_NONE:
     case JUNCTION_CROSS:
@@ -74,29 +74,14 @@ FollowState FollowMode::transitionFollowing(JunctionType junction)
 }
 
 
-FollowState FollowMode::transitionTurnAround(JunctionType junction, float rel_angle)
+FollowState FollowMode::transitionLost(JunctionType junction, float rel_angle)
 {
-  // TIMEOUT - Safety mechanism (using tis = time in state)
-  if (tis > 5000) {
-    Serial.println("[FOLLOW] U-turn TIMEOUT");
-    return FOLLOW_LINE;
-  }
-  
-  // Check if turned enough AND found line
-  if (fabs(rel_angle) >= TURN_180_ANGLE * 0.9f) {
-    switch (junction) {
-      case JUNCTION_NONE:
-        Serial.print("[FOLLOW] U-turn complete (");
-        Serial.print(fabs(rel_angle) * 180.0f / PI, 1);
-        Serial.println("°)");
+  // Check if we found a line again
+  if (junction != JUNCTION_LOST) {
         return FOLLOW_LINE;
-        
-      default:
-        return FOLLOW_TURN_AROUND;
-    }
   }
-  
-  return FOLLOW_TURN_AROUND;
+
+  return FOLLOW_LOST;
 }
 
 
@@ -109,9 +94,9 @@ bool FollowMode::shouldFollowLine()
   return state == FOLLOW_LINE;
 }
 
-bool FollowMode::shouldTurnAround()
+bool FollowMode::shouldSpiral()
 {
-  return state == FOLLOW_TURN_AROUND;
+  return state == FOLLOW_LOST;
 }
 
 // ============================================================================
@@ -130,7 +115,7 @@ void FollowMode::changeState(FollowState new_state)
     switch (new_state) {
       case FOLLOW_IDLE: Serial.println("FOLLOW IDLE"); break;
       case FOLLOW_LINE: Serial.println("FOLLOWING LINE"); break;
-      case FOLLOW_TURN_AROUND: Serial.println("U_TURN"); break;
+      case FOLLOW_LOST: Serial.println("LOOKING FOR LINE"); break;
     }
   }
 }
