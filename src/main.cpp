@@ -91,27 +91,74 @@ void read_encoders(void)
 // PWM MOTOR CONTROL 
 // ============================================================================
 
-void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
+//L298N
+// void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
+// {
+//   int PWM_max = 200;
+//   if (new_PWM >  PWM_max) new_PWM =  PWM_max;
+//   if (new_PWM < -PWM_max) new_PWM = -PWM_max;
+  
+//   if (new_PWM == 0) {
+//     // Motor parado
+//     digitalWrite(pin_a, LOW);
+//     digitalWrite(pin_b, LOW);
+//     analogWrite(pin_en, 0);
+//   } else if (new_PWM > 0) {
+//     // Motor frente
+//     digitalWrite(pin_a, HIGH);
+//     digitalWrite(pin_b, LOW);
+//     analogWrite(pin_en, abs(new_PWM));
+//   } else {
+//     // Motor ré
+//     digitalWrite(pin_a, LOW);
+//     digitalWrite(pin_b, HIGH);
+//     analogWrite(pin_en, abs(new_PWM));
+//   }
+// }
+
+
+//ZK-5AD
+// void setMotorPWM(int new_PWM, int pin_d0, int pin_d1)
+// {
+//   // Limita PWM entre -255 e +255
+//   new_PWM = constrain(new_PWM, -255, 255);
+  
+//   if (new_PWM == 0) {
+//     // PARADO - Ambos LOW (brake mode)
+//     digitalWrite(pin_d0, LOW);
+//     digitalWrite(pin_d1, LOW);
+    
+//   } else if (new_PWM > 0) {
+//     // FRENTE - D0 recebe PWM, D1 fica LOW
+//     analogWrite(pin_d0, abs(new_PWM));
+//     digitalWrite(pin_d1, LOW);
+    
+//   } else {
+//     // RÉ - D0 fica LOW, D1 recebe PWM
+//     digitalWrite(pin_d0, LOW);
+//     analogWrite(pin_d1, abs(new_PWM));
+//   }
+// }
+
+void setMotorPWM(int new_PWM, int pin_a, int pin_b)
 {
-  int PWM_max = 200;
-  if (new_PWM >  PWM_max) new_PWM =  PWM_max;
-  if (new_PWM < -PWM_max) new_PWM = -PWM_max;
+  // Limita PWM entre -255 e +255
+  new_PWM = constrain(new_PWM, -255, 255);
   
   if (new_PWM == 0) {
-    // Motor parado
+    // PARADO - Ambos LOW (brake mode)
     digitalWrite(pin_a, LOW);
     digitalWrite(pin_b, LOW);
-    analogWrite(pin_en, 0);
+    
   } else if (new_PWM > 0) {
-    // Motor frente
-    digitalWrite(pin_a, HIGH);
+    // FRENTE - A recebe PWM, B fica LOW
+    analogWrite(pin_a, abs(new_PWM));
     digitalWrite(pin_b, LOW);
-    analogWrite(pin_en, abs(new_PWM));
+    
   } else {
-    // Motor ré
+    // RÉ - A fica LOW, B recebe PWM
     digitalWrite(pin_a, LOW);
-    digitalWrite(pin_b, HIGH);
-    analogWrite(pin_en, abs(new_PWM));
+    analogWrite(pin_b, abs(new_PWM));
   }
 }
 // ============================================================================
@@ -464,6 +511,17 @@ void process_command(frame_data_t frame)
 void setup() 
 {
   // Pins
+
+  // pinMode(MOTOR1_IN1, OUTPUT);
+  // pinMode(MOTOR1_IN2, OUTPUT);
+  // pinMode(MOTOR1_EN, OUTPUT);
+  
+ 
+  // pinMode(MOTOR2_IN3, OUTPUT);
+  // pinMode(MOTOR2_IN4, OUTPUT);
+  // pinMode(MOTOR2_EN, OUTPUT);
+  
+
   pinMode(ENC1_A, INPUT_PULLUP);
   pinMode(ENC1_B, INPUT_PULLUP);
   pinMode(ENC2_A, INPUT_PULLUP);
@@ -471,16 +529,17 @@ void setup()
 
   pinMode(TEST_PIN, OUTPUT);
 
-  pinMode(MOTOR1_IN1, OUTPUT);
-  pinMode(MOTOR1_IN2, OUTPUT);
-  pinMode(MOTOR1_EN, OUTPUT);
+  // Motor pins - Pico4Drive
+  pinMode(MOTOR1A_PIN, OUTPUT);
+  pinMode(MOTOR1B_PIN, OUTPUT);
+  pinMode(MOTOR2A_PIN, OUTPUT);
+  pinMode(MOTOR2B_PIN, OUTPUT);
   
- 
-  pinMode(MOTOR2_IN3, OUTPUT);
-  pinMode(MOTOR2_IN4, OUTPUT);
-  pinMode(MOTOR2_EN, OUTPUT);
-  
-
+  // Garante motores parados no início
+  digitalWrite(MOTOR1A_PIN, LOW);
+  digitalWrite(MOTOR1B_PIN, LOW);
+  digitalWrite(MOTOR2A_PIN, LOW);
+  digitalWrite(MOTOR2B_PIN, LOW);
   // Commands
   serial_commands.init(process_command);
 
@@ -633,22 +692,18 @@ void loop()
     robot.VWToMotorsVoltage();
 
     // Motors
-    setMotorPWM(robot.PWM_1, MOTOR1_IN1, MOTOR1_IN2, MOTOR1_EN);
-    setMotorPWM(robot.PWM_2, MOTOR2_IN3, MOTOR2_IN4, MOTOR2_EN);
+    setMotorPWM(robot.PWM_1, MOTOR1A_PIN, MOTOR1B_PIN);
+    setMotorPWM(robot.PWM_2, MOTOR2A_PIN, MOTOR2B_PIN);
 
     // Streaming
     if (sensor_stream) {
       out.print("S: ");
-      out.print(lineSensor.getDigitalSensorValue(0) ? "B" : "W");
-      out.print("|");
-      out.print(lineSensor.getAnalogSensorValue(0));
-      out.print(",");
-      out.print(lineSensor.getAnalogSensorValue(1));
-      out.print(",");
-      out.print(lineSensor.getAnalogSensorValue(2));
-      out.print("|");
-      out.print(lineSensor.getDigitalSensorValue(1) ? "B" : "W");
-      out.print(" P:");
+      out.print("[");
+      for (int i = 0; i < IR_SENSOR_COUNT; i++) {
+        if (i > 0) out.print(",");
+        out.print(lineSensor.getAnalogSensorValue(i));
+      }
+      out.print("] P:");
       out.println(lineSensor.getPosition());
     }
     

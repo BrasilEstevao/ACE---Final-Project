@@ -11,8 +11,8 @@ robot_t::robot_t()
   
   wheel_dist = WHEEL_DISTANCE;
   wheel_radius = WHEEL_RADIUS;
-  dv_max = 5;
-  dw_max = 10;
+  dv_max = 10;
+  dw_max = 20;
   dt = CONTROL_LOOP_S;
   
   // Initialize odometry state
@@ -207,7 +207,9 @@ void robot_t::lineFollowControl()
   line_last_error = error;
   
   float correction = line_kp * error + line_ki * line_integral + line_kd * derivative;
-  
+
+  correction = constrain(correction, -MAX_CORRECTION, MAX_CORRECTION);
+
   // Apply differential steering
   int leftSpeed = base_speed - correction;
   int rightSpeed = base_speed + correction;

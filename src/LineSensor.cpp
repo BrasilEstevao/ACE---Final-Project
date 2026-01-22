@@ -11,27 +11,44 @@ LineSensor::LineSensor()
     _threshold = IR_THRESHOLD;
     _linePosition = 0;
     _calibrated = false;
+    _waterLevel = 0;
+    _posLeft = 0;
+    _posRight = 0;
+    _irMax = 0;
+    _total = 0;
     
-    // Initialize arrays
-    for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
+    for (int i = 0; i < IR_SENSOR_COUNT; i++) {
         _analogSensors[i] = 0;
         _minValues[i] = 1023;
         _maxValues[i] = 0;
     }
     
-    for (int i = 0; i < NUM_DIGITAL_SENSORS; i++) {
-        _digitalSensors[i] = false;
-    }
+    // Configure MUX control pins
+    pinMode(MUXA_PIN, OUTPUT);
+    pinMode(MUXB_PIN, OUTPUT);
+    pinMode(MUXC_PIN, OUTPUT);
     
-    // Configure analog pins (center 3 sensors)
-    pinMode(IR_CENTER_LEFT, INPUT);
-    pinMode(IR_CENTER, INPUT);
-    pinMode(IR_CENTER_RIGHT, INPUT);
-    
-    // Configure DIGITAL pins (edge 2 sensors) with pull-up
-    // Most IR sensors output LOW when detecting black line
-    pinMode(IR_LEFT_PIN, INPUT_PULLUP);
-    pinMode(IR_RIGHT_PIN, INPUT_PULLUP);
+    // Configure ADC input pin
+    pinMode(ADC_IN_PIN, INPUT);
+}
+
+// ============================================================================
+// MULTIPLEXER CONTROL
+// ============================================================================
+
+void LineSensor::setMuxChannel(int channel)
+{
+    // Set MUX control pins (A, B, C) to select channel
+    digitalWrite(MUXA_PIN, channel & 1);
+    digitalWrite(MUXB_PIN, (channel >> 1) & 1);
+    digitalWrite(MUXC_PIN, (channel >> 2) & 1);
+}
+
+uint16_t LineSensor::readMuxChannel(int channel)
+{
+    setMuxChannel(channel);
+    delayMicroseconds(100);  // Wait for MUX to settle
+    return analogRead(ADC_IN_PIN);
 }
 
 // ============================================================================
@@ -40,39 +57,34 @@ LineSensor::LineSensor()
 
 void LineSensor::read()
 {
-    // Read analog sensors (center 3) - inverted so black = high value
-    _analogSensors[0] = 1023 - analogRead(IR_CENTER_LEFT);
-    _analogSensors[1] = 1023 - analogRead(IR_CENTER);
-    _analogSensors[2] = 1023 - analogRead(IR_CENTER_RIGHT);
-    
-    // Read digital sensors (edges)
-    // Typical IR sensor: LOW = black detected, HIGH = white detected
-    // So we invert: true = black, false = white
-    _digitalSensors[0] = !digitalRead(IR_LEFT_PIN);   // Left edge
-    _digitalSensors[1] = !digitalRead(IR_RIGHT_PIN);  // Right edge
+    // Read all 5 IR sensors through multiplexer
+    // Channels 3-7 on the MUX
+    for (int i = 0; i < IR_SENSOR_COUNT; i++) {
+        // Read and invert (1023 - value) so black = high
+        _analogSensors[IR_SENSOR_COUNT - 1 - i] = 1023 - readMuxChannel(IR_MUX_START_CH + i);
+    }
 }
 
 void LineSensor::calibrate()
 {
     const int samples = 100;
     
-    // Reset calibration values
-    for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
+    for (int i = 0; i < IR_SENSOR_COUNT; i++) {
         _minValues[i] = 1023;
         _maxValues[i] = 0;
     }
     
     Serial.println("========================================");
-    Serial.println("CALIBRATING ANALOG SENSORS");
+    Serial.println("CALIBRATING IR SENSORS");
     Serial.println("========================================");
-    Serial.println("Move robot slowly over BLACK and WHITE");
+    Serial.println("Move robot over BLACK and WHITE");
     Serial.println("Sampling 100 readings...");
     Serial.println();
     
     for (int i = 0; i < samples; i++) {
         read();
         
-        for (int j = 0; j < NUM_ANALOG_SENSORS; j++) {
+        for (int j = 0; j < IR_SENSOR_COUNT; j++) {
             if (_analogSensors[j] > _maxValues[j]) {
                 _maxValues[j] = _analogSensors[j];
             }
@@ -81,7 +93,6 @@ void LineSensor::calibrate()
             }
         }
         
-        // Progress indicator
         if (i % 10 == 0) {
             Serial.print("Progress: ");
             Serial.print(i);
@@ -91,12 +102,12 @@ void LineSensor::calibrate()
         delay(20);
     }
     
-    // Calculate average threshold
+    // Calculate threshold
     int avgThreshold = 0;
-    for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
+    for (int i = 0; i < IR_SENSOR_COUNT; i++) {
         avgThreshold += (_maxValues[i] + _minValues[i]) / 2;
     }
-    _threshold = avgThreshold / NUM_ANALOG_SENSORS;
+    _threshold = avgThreshold / IR_SENSOR_COUNT;
     _calibrated = true;
     
     Serial.println();
@@ -105,152 +116,210 @@ void LineSensor::calibrate()
     Serial.println("========================================");
     Serial.print("Threshold: ");
     Serial.println(_threshold);
-    Serial.println("Min values: ");
-    for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
-        Serial.print("  Sensor ");
+    for (int i = 0; i < IR_SENSOR_COUNT; i++) {
+        Serial.print("Sensor ");
         Serial.print(i);
-        Serial.print(": ");
-        Serial.println(_minValues[i]);
-    }
-    Serial.println("Max values: ");
-    for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
-        Serial.print("  Sensor ");
-        Serial.print(i);
-        Serial.print(": ");
+        Serial.print(": min=");
+        Serial.print(_minValues[i]);
+        Serial.print(" max=");
         Serial.println(_maxValues[i]);
     }
     Serial.println("========================================");
-    Serial.println();
 }
 
 // ============================================================================
-// LINE POSITION CALCULATION 
+// LINE POSITION - Using IRLine algorithm
 // ============================================================================
+
+void LineSensor::calcLineEdgeLeft()
+{
+    bool found = false;
+    _irMax = 0;
+    _posLeft = 2 * 16.0;
+    _total = 0;
+    int lastV = 0;
+    
+    for (int c = 0; c < IR_SENSOR_COUNT; c++) {
+        int v = _analogSensors[c] - _waterLevel;
+        if (v < 0) v = 0;
+        if (v > _irMax) _irMax = v;
+        
+        _total += v;
+        
+        if (!found && lastV < _threshold && v > _threshold) {
+            _posLeft = -12 + 16.0 * (c - 2) + 16.0 * (_threshold - lastV) / (v - lastV);
+            found = true;
+        }
+        lastV = v;
+    }
+}
+
+void LineSensor::calcLineEdgeRight()
+{
+    bool found = false;
+    _irMax = 0;
+    _posRight = -2 * 16.0;
+    _total = 0;
+    int lastV = 0;
+    
+    for (int c = 0; c < IR_SENSOR_COUNT; c++) {
+        int v = _analogSensors[IR_SENSOR_COUNT - 1 - c] - _waterLevel;
+        if (v < 0) v = 0;
+        if (v > _irMax) _irMax = v;
+        
+        _total += v;
+        
+        if (!found && lastV < _threshold && v > _threshold) {
+            _posRight = -(-12 + 16.0 * (c - 2) + 16.0 * (_threshold - lastV) / (v - lastV));
+            found = true;
+        }
+        lastV = v;
+    }
+}
 
 int LineSensor::getPosition()
 {
-    // Use weighted average of 3 center sensors
-    // Position: -1000 (left) to +1000 (right)
+    // Calculate using weighted average
+    calcLineEdgeLeft();
     
     long weighted_sum = 0;
     long sum = 0;
+    int weights[5] = {-2, -1, 0, 1, 2};
     
-    // Weights: -1 (left), 0 (center), +1 (right)
-    int weights[3] = {-1, 0, 1};
-    
-    for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
-        if (_analogSensors[i] > _threshold) {
-            weighted_sum += (long)(_analogSensors[i]) * weights[i] * 1000;
-            sum += _analogSensors[i];
+    for (int i = 0; i < IR_SENSOR_COUNT; i++) {
+        int v = _analogSensors[i] - _waterLevel;
+        if (v < 0) v = 0;
+        
+        if (v > _threshold) {
+            weighted_sum += (long)v * weights[i] * 500;
+            sum += v;
         }
     }
     
     if (sum > 0) {
         _linePosition = weighted_sum / sum;
     }
-    // If no line detected, keep last position
     
     return _linePosition;
 }
 
 // ============================================================================
-// JUNCTION DETECTION
+// NODE/JUNCTION DETECTION - IRLine style
 // ============================================================================
+
+char LineSensor::detectNode()
+{
+    static char last_node = 'E';
+    static int stability_count = 0;
+    static int required_stability = 40;
+    
+    char current_node;
+    
+    // XXXOO - Left
+    if (_analogSensors[0] > _threshold && 
+        _analogSensors[1] > _threshold && 
+        _analogSensors[2] > _threshold && 
+        _analogSensors[3] < _threshold && 
+        _analogSensors[4] < _threshold) {
+        current_node = 'L';
+    }
+    // OOXXX - Right
+    else if (_analogSensors[0] < _threshold && 
+             _analogSensors[1] < _threshold && 
+             _analogSensors[2] > _threshold && 
+             _analogSensors[3] > _threshold && 
+             _analogSensors[4] > _threshold) {
+        current_node = 'R';
+    }
+    // XXXXX - T/Cross/End
+    else if (_analogSensors[0] > _threshold && 
+             _analogSensors[1] > _threshold && 
+             _analogSensors[2] > _threshold && 
+             _analogSensors[3] > _threshold && 
+             _analogSensors[4] > _threshold) {
+        current_node = 'B';
+    }
+    // OOOOO - Lost/White
+    else if (_analogSensors[0] < _threshold && 
+             _analogSensors[1] < _threshold && 
+             _analogSensors[2] < _threshold && 
+             _analogSensors[3] < _threshold && 
+             _analogSensors[4] < _threshold) {
+        current_node = 'W';
+    }
+    // Normal line patterns
+    else if ((_analogSensors[1] > _threshold) || 
+             (_analogSensors[2] > _threshold) || 
+             (_analogSensors[3] > _threshold)) {
+        current_node = 'N';
+    }
+    else {
+        current_node = 'E';
+    }
+    
+    // Stability check
+    if (current_node == last_node) {
+        stability_count++;
+    } else {
+        stability_count = 0;
+        last_node = current_node;
+    }
+    
+    if (stability_count >= required_stability) {
+        return current_node;
+    }
+    
+    return 'E';
+}
 
 JunctionType LineSensor::detectJunction()
 {
-    // Count black detections
-    int analogBlackCount = 0;
-    int totalBlackCount = 0;
+    char node = detectNode();
     
-    // Check analog sensors
-    for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
-        if (_analogSensors[i] > _threshold) {
-            analogBlackCount++;
-            totalBlackCount++;
-        }
-    }
-    
-    // Check digital sensors
-    bool leftEdge = _digitalSensors[0];
-    bool rightEdge = _digitalSensors[1];
-    
-    if (leftEdge) totalBlackCount++;
-    if (rightEdge) totalBlackCount++;
-    
-    // Decision logic
-    if (totalBlackCount == 0) {
-        return JUNCTION_LOST;
-    }
-    else if (leftEdge && rightEdge && analogBlackCount > 0) {
-        // Both edges + center = T junction or cross
-        return JUNCTION_T;
-    }
-    else if (leftEdge && !rightEdge && analogBlackCount  > 2) {
-        // Left edge detects + some center = left turn
-        return JUNCTION_LEFT;
-    }
-    else if (rightEdge && !leftEdge && analogBlackCount > 2) {
-        // Right edge detects + some center = right turn
-        return JUNCTION_RIGHT;
-    }
-    else {
-        // Normal line following
-        return JUNCTION_NONE;
+    switch (node) {
+        case 'L': return JUNCTION_LEFT;
+        case 'R': return JUNCTION_RIGHT;
+        case 'B': return JUNCTION_T;
+        case 'W': return JUNCTION_LOST;
+        case 'N': return JUNCTION_NONE;
+        default:  return JUNCTION_NONE;
     }
 }
 
 // ============================================================================
-// UTILITY METHODS
+// UTILITY
 // ============================================================================
+
+uint32_t LineSensor::encodeIRSensors()
+{
+    uint32_t result = _analogSensors[0] >> 4;
+    for (int c = 1; c < IR_SENSOR_COUNT; c++) {
+        result = (result << 6) | (_analogSensors[c] >> 4);
+    }
+    return result;
+}
 
 int LineSensor::getAnalogSensorValue(int index)
 {
-    if (index >= 0 && index < NUM_ANALOG_SENSORS) {
+    if (index >= 0 && index < IR_SENSOR_COUNT) {
         return _analogSensors[index];
     }
     return 0;
 }
 
-bool LineSensor::getDigitalSensorValue(int index)
-{
-    if (index >= 0 && index < NUM_DIGITAL_SENSORS) {
-        return _digitalSensors[index];
-    }
-    return false;
-}
-
 void LineSensor::printValues()
 {
-    Serial.print("D:[");
-    Serial.print(_digitalSensors[0] ? "□" : "■");
-    Serial.print("] A:[");
-    
-    for (int i = 0; i < NUM_ANALOG_SENSORS; i++) {
+    Serial.print("IR:[");
+    for (int i = 0; i < IR_SENSOR_COUNT; i++) {
         if (i > 0) Serial.print(",");
         if (_analogSensors[i] < 100) Serial.print(" ");
         if (_analogSensors[i] < 10) Serial.print(" ");
         Serial.print(_analogSensors[i]);
     }
-    
-    Serial.print("] D:[");
-    Serial.print(_digitalSensors[1] ? "□" : "■");
     Serial.print("] Pos:");
-    if (_linePosition >= 0) Serial.print(" ");
-    if (abs(_linePosition) < 1000) Serial.print(" ");
-    if (abs(_linePosition) < 100) Serial.print(" ");
     Serial.print(_linePosition);
-    Serial.print(" | ");
-    
-    JunctionType j = detectJunction();
-    switch(j) {
-        case JUNCTION_NONE:  Serial.println("LINE  "); break;
-        case JUNCTION_LEFT:  Serial.println("◄ LEFT"); break;
-        case JUNCTION_RIGHT: Serial.println("RIGHT►"); break;
-        case JUNCTION_T:     Serial.println("◄ T ► "); break;
-        case JUNCTION_CROSS: Serial.println("CROSS+"); break;
-        case JUNCTION_LOST:  Serial.println("LOST ✗"); break;
-    }
+    Serial.print(" | Node:");
+    Serial.println(detectNode());
 }
 
 void LineSensor::setThreshold(int threshold)
