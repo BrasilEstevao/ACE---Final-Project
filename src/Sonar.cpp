@@ -12,6 +12,7 @@ Sonar::Sonar()
   state = SONAR_CLEAR;
   last_state = SONAR_CLEAR;
   state_entry_time = 0;
+  last_distance_cm = 0.0;
   tes = 0;  // Time Entering State
   tis = 0;  // Time In State
 }
@@ -29,6 +30,7 @@ void Sonar::update()
   
   // Read distance from sonar
   double* distance_cm = HCSR04.measureDistanceCm();
+  last_distance_cm = distance_cm[0];
 
 //    _terminal->print("Sonar update called. Distance: ");
 //    _terminal->println(distance_cm[0], 1);
@@ -78,6 +80,11 @@ void Sonar::update()
 SonarState Sonar::getState()
 {
   return state;
+}
+
+float Sonar::getLastDistanceCm()
+{
+  return last_distance_cm;
 }
 
 // ========================================================================

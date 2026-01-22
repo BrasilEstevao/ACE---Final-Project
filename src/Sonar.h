@@ -24,6 +24,7 @@ public:
   
   unsigned long tes;         // Time Entering State (ms)
   unsigned long tis;         // Time In State (ms)
+  float last_distance_cm; // Last measured distance in cm
   
   // ========================================================================
   // CONSTRUCTOR
@@ -47,6 +48,7 @@ public:
   // ========================================================================
   SonarState getState();
   unsigned long getTimeInState();
+  float getLastDistanceCm();
 
 private:
   // ========================================================================       
@@ -55,7 +57,7 @@ private:
   unsigned long state_entry_time;
   int enter_count = 0;
   int exit_count = 0;
-  static const int ENTER_THRESHOLD = 10;
+  static const int ENTER_THRESHOLD = 5;
   static const int EXIT_THRESHOLD = 5;
 
   void changeState(SonarState new_state);
@@ -66,5 +68,6 @@ private:
 // ============================================================================
 
 #define SONAR_OBSTRUCTION_THRESHOLD_CM   22.0f   // Distance threshold in cm
+#define SONAR_APPROACH_DISTANCE_CM       6.0f    // Distance to consider "approached"
 
 #endif // SONAR_H

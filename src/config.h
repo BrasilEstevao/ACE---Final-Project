@@ -4,12 +4,12 @@
 // ============================================================================
 // MOTOR DRIVER L298N PINS
 // ============================================================================
-#define MOTOR1_IN1      4
-#define MOTOR1_IN2      3
+#define MOTOR1_IN1      3
+#define MOTOR1_IN2      4
 #define MOTOR1_EN       5
 
-#define MOTOR2_IN3      2
-#define MOTOR2_IN4      1
+#define MOTOR2_IN3      1
+#define MOTOR2_IN4      2
 #define MOTOR2_EN       0
 
 // ============================================================================
@@ -24,9 +24,9 @@
 #define IR_LEFT_PIN     21    // Digital edge sensor
 #define IR_RIGHT_PIN    22    // Digital edge sensor
 
-#define IR_CENTER_LEFT  26    // A0 - Analog
+#define IR_CENTER_LEFT  28    // A0 - Analog
 #define IR_CENTER       27    // A1 - Analog
-#define IR_CENTER_RIGHT 28    // A2 - Analog
+#define IR_CENTER_RIGHT 26    // A2 - Analog
 
 // ============================================================================
 // ENCODER PINS

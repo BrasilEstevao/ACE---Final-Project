@@ -13,12 +13,15 @@ typedef enum {
   FOLLOW_IDLE,
   FOLLOW_LINE,
   FOLLOW_LOST,
+  FOLLOW_APPROACH,
   FOLLOW_BLOCKED,
+  FOLLOW_AROUND,
 } FollowState;
 
 class FollowMode {
 private:
 
+  WiFiTerminal* _terminal;  // Pointer to terminal
   Sonar* _Sonar1;  // Pointer to sonar
 
 public:
@@ -39,6 +42,8 @@ public:
   FollowMode();
 
   void setSonar(Sonar* sonar) { _Sonar1 = sonar; }
+
+  void setTerminal(WiFiTerminal* terminal) { _terminal = terminal; }
   
   // ========================================================================
   // MAIN UPDATE 
@@ -50,7 +55,9 @@ public:
   // ========================================================================
   bool shouldFollowLine();
   bool shouldSpiral();
+  bool shouldApproach();
   bool shouldStop();
+  bool shouldGoAround();
   
   // ========================================================================
   // CONTROL
@@ -79,7 +86,9 @@ private:
   FollowState transitionIdle();
   FollowState transitionFollowing(JunctionType junction);
   FollowState transitionLost(JunctionType junction, float rel_angle);
+  FollowState transitionApproach();
   FollowState transitionBlocked();
+  FollowState transitionAround(JunctionType junction);
 };
 
 #endif // FOLLOW_MODE_H

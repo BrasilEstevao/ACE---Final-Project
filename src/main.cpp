@@ -176,20 +176,20 @@ public:
 void printMazeStatus()
 {
   char posBuf[64];
-  MazeSolver.getPositionString(posBuf, sizeof(posBuf));
+  Mazesolver.getPositionString(posBuf, sizeof(posBuf));
   
   out.println("\n=== MAZE SOLVER - LEFT-HAND ===");
   out.print("State: ");
-  out.println(MazeSolver.getStateName());
+  out.println(Mazesolver.getStateName());
   out.print("Position: ");
   out.println(posBuf);
   out.print("Time: ");
-  out.print(MazeSolver.getTimeInState());
+  out.print(Mazesolver.getTimeInState());
   out.println(" ms");
   
-  if (MazeSolver.stored_junction != JUNCTION_NONE) {
+  if (Mazesolver.stored_junction != JUNCTION_NONE) {
     out.print("Last junction: ");
-    switch (MazeSolver.stored_junction) {
+    switch (Mazesolver.stored_junction) {
       case JUNCTION_LEFT: out.println("LEFT"); break;
       case JUNCTION_RIGHT: out.println("RIGHT"); break;
       case JUNCTION_T: out.println("T-JUNCTION"); break;
@@ -208,7 +208,7 @@ void printFollowStatus()
   switch (followMode.getState()) {
     case FOLLOW_IDLE: out.println("IDLE"); break;
     case FOLLOW_LINE: out.println("FOLLOWING"); break;
-    case FOLLOW_TURN_AROUND: out.println("U-TURN"); break;
+    case FOLLOW_LOST: out.println("LOST"); break;
   }
   
   out.print("Time: ");
@@ -549,8 +549,9 @@ void setup()
 
   // Follow mode
   followMode.setSonar(&Sonar1);
+  followMode.setTerminal(&terminal);
 
-  MazeSolver.setTerminal(&terminal);
+  Mazesolver.setTerminal(&terminal);
 
   if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
     Serial.println("[OK] WiFi ready");
@@ -643,10 +644,10 @@ void loop()
       }
       
       // Reset relative angle when entering U-turn
-      if (prev_follow_state != FOLLOW_TURN_AROUND && 
-          followMode.getState() == FOLLOW_TURN_AROUND) {
+      if (prev_follow_state != FOLLOW_LOST && 
+          followMode.getState() == FOLLOW_LOST) {
         robot.resetRelative();
-        out.println("[FOLLOW] Starting U-turn...");
+        out.println("[FOLLOW] Looking for line...");
       }
       
       if (followMode.shouldFollowLine()) {
@@ -654,7 +655,7 @@ void loop()
       }
       else if (followMode.shouldSpiral()) {
         out.println("[FOLLOW] Spiraling");
-        robot.setRobotVW(-0.05f, 0.0f);  // Spiral out
+        robot.setRobotVW(-0.05f, 0.0f);  
         robot.control_mode = cm_pid;
       }
       else if (followMode.shouldStop()) {
@@ -662,6 +663,14 @@ void loop()
         robot.control_mode = cm_pwm;
         robot.PWM_1 = 0;
         robot.PWM_2 = 0;
+      }
+      else if (followMode.shouldApproach()) {
+        out.println("[FOLLOW] Approaching obstacle");
+        robot.setRobotVW(0.05f, 0.0f);  // Slow approach
+      }
+      else if (followMode.shouldGoAround()) {
+        out.println("[FOLLOW] Going around obstacle");
+        robot.setGotoAngle(TURN_90_ANGLE);
       }
     }
 
@@ -712,7 +721,7 @@ void loop()
     // ======================================================================
 
     robot.accelerationLimit();   
-    
+
     if (robot.control_mode == cm_goto_distance) {
         robot.gotoDistanceControl(); 
     }
