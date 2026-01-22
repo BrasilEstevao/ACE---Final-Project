@@ -6,15 +6,21 @@
 
 #include <Arduino.h>
 #include "LineSensor.h"
+#include "Sonar.h"
 
 // Follow line states
 typedef enum {
   FOLLOW_IDLE,
   FOLLOW_LINE,
-  FOLLOW_TURN_AROUND,
+  FOLLOW_LOST,
+  FOLLOW_BLOCKED,
 } FollowState;
 
 class FollowMode {
+private:
+
+  Sonar* _Sonar1;  // Pointer to sonar
+
 public:
   // ========================================================================
   // STATE MACHINE VARIABLES
@@ -31,6 +37,8 @@ public:
   // CONSTRUCTOR
   // ========================================================================
   FollowMode();
+
+  void setSonar(Sonar* sonar) { _Sonar1 = sonar; }
   
   // ========================================================================
   // MAIN UPDATE 
@@ -41,7 +49,8 @@ public:
   // STATE OUTPUTS 
   // ========================================================================
   bool shouldFollowLine();
-  bool shouldTurnAround();
+  bool shouldSpiral();
+  bool shouldStop();
   
   // ========================================================================
   // CONTROL
@@ -69,7 +78,8 @@ private:
   // ========================================================================
   FollowState transitionIdle();
   FollowState transitionFollowing(JunctionType junction);
-  FollowState transitionTurnAround(JunctionType junction, float rel_angle);
+  FollowState transitionLost(JunctionType junction, float rel_angle);
+  FollowState transitionBlocked();
 };
 
 #endif // FOLLOW_MODE_H
