@@ -55,7 +55,7 @@ private:
   unsigned long state_entry_time;
   int enter_count = 0;
   int exit_count = 0;
-  static const int ENTER_THRESHOLD = 10;
+  static const int ENTER_THRESHOLD = 5;
   static const int EXIT_THRESHOLD = 5;
 
   void changeState(SonarState new_state);
@@ -65,6 +65,6 @@ private:
 // CONSTANTS
 // ============================================================================
 
-#define SONAR_OBSTRUCTION_THRESHOLD_CM   22.0f   // Distance threshold in cm
+#define SONAR_OBSTRUCTION_THRESHOLD_CM   25.0f   // Distance threshold in cm
 
 #endif // SONAR_H
