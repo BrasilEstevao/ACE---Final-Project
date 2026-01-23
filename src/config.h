@@ -4,13 +4,21 @@
 // ============================================================================
 // MOTOR DRIVER L298N PINS
 // ============================================================================
-#define MOTOR1_IN1      4
-#define MOTOR1_IN2      3
-#define MOTOR1_EN       5
+#define MOTOR1_D0       4    // Motor 1 - Controle sentido 1
+#define MOTOR1_D1       3    // Motor 1 - Controle sentido 2
 
-#define MOTOR2_IN3      2
-#define MOTOR2_IN4      1
-#define MOTOR2_EN       0
+#define MOTOR2_D2       1    // Motor 2 - Controle sentido 1
+#define MOTOR2_D3       2    // Motor 2 - Controle sentido 2
+
+
+
+// #define MOTOR1_IN1      4
+// #define MOTOR1_IN2      3
+// #define MOTOR1_EN       5
+
+// #define MOTOR2_IN3      2
+// #define MOTOR2_IN4      1
+// #define MOTOR2_EN       0
 
 // ============================================================================
 // SONAR SENSOR PINS
@@ -54,14 +62,15 @@
 // ============================================================================
 #define BASE_SPEED      90
 #define MAX_SPEED       200
+#define MAX_CORRECTION  100
 #define TURN_SPEED      100
 
 // ============================================================================
 // LINE FOLLOWING PID
 // ============================================================================
-#define LINE_KP         0.3f
+#define LINE_KP         0.1f
 #define LINE_KI         0.0f
-#define LINE_KD         0.5f
+#define LINE_KD         0.3f
 
 // ============================================================================
 // SENSOR CONFIGURATION

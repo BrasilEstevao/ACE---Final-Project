@@ -91,29 +91,29 @@ void read_encoders(void)
 // PWM MOTOR CONTROL 
 // ============================================================================
 
-void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
+void setMotorPWM(int new_PWM, int pin_d0, int pin_d1)
 {
-  int PWM_max = 200;
-  if (new_PWM >  PWM_max) new_PWM =  PWM_max;
-  if (new_PWM < -PWM_max) new_PWM = -PWM_max;
+  // Limita PWM entre -255 e +255
+  new_PWM = constrain(new_PWM, -255, 255);
   
   if (new_PWM == 0) {
-    // Motor parado
-    digitalWrite(pin_a, LOW);
-    digitalWrite(pin_b, LOW);
-    analogWrite(pin_en, 0);
+    // PARADO - Ambos LOW (brake mode)
+    digitalWrite(pin_d0, LOW);
+    digitalWrite(pin_d1, LOW);
+    
   } else if (new_PWM > 0) {
-    // Motor frente
-    digitalWrite(pin_a, HIGH);
-    digitalWrite(pin_b, LOW);
-    analogWrite(pin_en, abs(new_PWM));
+    // FRENTE - D0 recebe PWM, D1 fica LOW
+    analogWrite(pin_d0, abs(new_PWM));
+    digitalWrite(pin_d1, LOW);
+    
   } else {
-    // Motor ré
-    digitalWrite(pin_a, LOW);
-    digitalWrite(pin_b, HIGH);
-    analogWrite(pin_en, abs(new_PWM));
+    // RÉ - D0 fica LOW, D1 recebe PWM
+    digitalWrite(pin_d0, LOW);
+    analogWrite(pin_d1, abs(new_PWM));
   }
 }
+
+
 // ============================================================================
 // GLOBAL OBJECTS
 // ============================================================================
@@ -471,15 +471,16 @@ void setup()
 
   pinMode(TEST_PIN, OUTPUT);
 
-  pinMode(MOTOR1_IN1, OUTPUT);
-  pinMode(MOTOR1_IN2, OUTPUT);
-  pinMode(MOTOR1_EN, OUTPUT);
+  pinMode(MOTOR1_D0, OUTPUT);
+  pinMode(MOTOR1_D1, OUTPUT);
+  pinMode(MOTOR2_D2, OUTPUT);
+  pinMode(MOTOR2_D3, OUTPUT);
   
- 
-  pinMode(MOTOR2_IN3, OUTPUT);
-  pinMode(MOTOR2_IN4, OUTPUT);
-  pinMode(MOTOR2_EN, OUTPUT);
-  
+  // Garante motores parados no início
+  digitalWrite(MOTOR1_D0, LOW);
+  digitalWrite(MOTOR1_D1, LOW);
+  digitalWrite(MOTOR2_D2, LOW);
+  digitalWrite(MOTOR2_D3, LOW);
 
   // Commands
   serial_commands.init(process_command);
@@ -633,9 +634,9 @@ void loop()
     robot.VWToMotorsVoltage();
 
     // Motors
-    setMotorPWM(robot.PWM_1, MOTOR1_IN1, MOTOR1_IN2, MOTOR1_EN);
-    setMotorPWM(robot.PWM_2, MOTOR2_IN3, MOTOR2_IN4, MOTOR2_EN);
-
+    setMotorPWM(robot.PWM_1, MOTOR1_D0, MOTOR1_D1);
+    setMotorPWM(robot.PWM_2, MOTOR2_D2, MOTOR2_D3);
+    
     // Streaming
     if (sensor_stream) {
       out.print("S: ");

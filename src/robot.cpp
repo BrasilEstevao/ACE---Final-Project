@@ -207,10 +207,11 @@ void robot_t::lineFollowControl()
   line_last_error = error;
   
   float correction = line_kp * error + line_ki * line_integral + line_kd * derivative;
+//correction = constrain(correction, -MAX_CORRECTION, MAX_CORRECTION);
   
   // Apply differential steering
-  int leftSpeed = base_speed - correction;
-  int rightSpeed = base_speed + correction;
+  int leftSpeed = base_speed + correction;
+  int rightSpeed = base_speed - correction;
   
   PWM_1 = constrain(leftSpeed, -MAX_SPEED, MAX_SPEED);
   PWM_2 = constrain(rightSpeed, -MAX_SPEED, MAX_SPEED);
