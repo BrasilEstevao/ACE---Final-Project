@@ -76,14 +76,16 @@ FollowState FollowMode::transitionFollowing(JunctionType junction)
     return FOLLOW_LOST;
   }
 
-  switch(_Sonar1->getState()) {
-    case SONAR_OBSTRUCTED:
-      _terminal->println("[FOLLOW] Path blocked - stopping");
-      return FOLLOW_APPROACH;
-    case SONAR_CLEAR:
-    default:
-      return FOLLOW_LINE;
-  }
+  return FOLLOW_LINE;
+
+  // switch(_Sonar1->getState()) {
+  //   case SONAR_OBSTRUCTED:
+  //     _terminal->println("[FOLLOW] Path blocked - stopping");
+  //     return FOLLOW_APPROACH;
+  //   case SONAR_CLEAR:
+  //   default:
+  //     return FOLLOW_LINE;
+  // }
 }
 
 

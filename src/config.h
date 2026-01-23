@@ -5,22 +5,12 @@
 // MOTOR DRIVER
 // ============================================================================
 
-//TB6612FNG
-// #define MOTOR1_IN1      4    // AIN1 - Direção
-// #define MOTOR1_IN2      3    // AIN2 - Direção
-// #define MOTOR1_PWM      5    // PWMA - Velocidade
+#define MOTOR1A_PIN 16
+#define MOTOR1B_PIN 17
 
-// #define MOTOR2_IN1      2    // BIN1 - Direção
-// #define MOTOR2_IN2      1    // BIN2 - Direção
-// #define MOTOR2_PWM      0    // PWMB - Velocidade
+#define MOTOR2A_PIN 14
+#define MOTOR2B_PIN 15
 
-// #define MOTOR_STBY      8    // STBY - Enable geral
-
-#define MOTOR1A_PIN 17
-#define MOTOR1B_PIN 16
-
-#define MOTOR2A_PIN 15
-#define MOTOR2B_PIN 14
 
 // ============================================================================
 // SONAR SENSOR PINS
@@ -66,23 +56,25 @@
 // ============================================================================
 // CONTROL TIMING 
 // ============================================================================
-#define CONTROL_LOOP_MS     40
-#define CONTROL_LOOP_S      0.040f
+#define CONTROL_LOOP_MS     10
+#define CONTROL_LOOP_S      0.010f
 
 // ============================================================================
 // MOTOR SPEEDS
 // ============================================================================
-#define BASE_SPEED      120
+
+#define BASE_SPEED 50 
 #define MAX_SPEED       200
-#define MAX_CORRECTION  40
+#define MAX_CORRECTION  150
 #define TURN_SPEED      100
+#define ALIGN_FACTOR 1.05
 
 // ============================================================================
 // LINE FOLLOWING PID
 // ============================================================================
-#define LINE_KP         0.3f
+#define LINE_KP         0.044f
 #define LINE_KI         0.0f
-#define LINE_KD         0.2f
+#define LINE_KD         0.007246494f
 
 // ============================================================================
 // SENSOR CONFIGURATION

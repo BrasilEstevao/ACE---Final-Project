@@ -28,6 +28,7 @@ public:
     void printValues();
     void setThreshold(int threshold);
     int getThreshold();
+    int IR_sum();
     
     // New methods for IRLine compatibility
     uint32_t encodeIRSensors();
@@ -59,6 +60,11 @@ private:
     float _posRight;
     int _irMax;
     int _total;
+
+    double error;         // Error
+    double prevError = 0; // Previous Error for each sensor
+    double integral = 0; // Integral for each sensor
+    double derivative = 0; // Derivative for each sensor
 };
 
 #endif

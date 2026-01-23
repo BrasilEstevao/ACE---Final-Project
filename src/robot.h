@@ -18,7 +18,7 @@ typedef enum {
 class robot_t {
 public:
   // ========================================================================
-  // SENSORS (
+  // SENSORS
   // ========================================================================
   int enc1, enc2;              
   int Senc1, Senc2;            
@@ -64,12 +64,15 @@ public:
   float battery_voltage;
   
   // ========================================================================
-  // LINE FOLLOWING 
+  // LINE FOLLOWING - WEIGHTED ERROR METHOD (do IRLine.cpp)
   // ========================================================================
-  float line_kp, line_ki, line_kd;
-  int line_last_error;
-  int line_integral;
-  int base_speed;
+  float line_kp, line_ki, line_kd;     // PID gains
+  int line_error;                       // Current weighted error
+  int line_prev_error;                  // Previous error for derivative
+  int line_integral;                    // Integral accumulator
+  int line_derivative;                  // Derivative term
+  int base_speed;                       // Base motor speed
+  int ir_sum_threshold;                 // Threshold for IR sensor sum
   
   // ========================================================================
   // GOTO TARGETS 
@@ -91,10 +94,10 @@ public:
   void VWToMotorsVoltage(void);                // Convert v,w to motor PWM
   
   // ========================================================================
-  // NEW METHODS 
+  // CONTROL METHODS
   // ========================================================================
   void setLineSensor(LineSensor* sensor);      // Attach line sensor
-  void lineFollowControl();                     // Line following PID
+  void lineFollowControl();                     // Weighted error line following (IRLine method)
   void gotoDistanceControl();                   // Navigate to distance
   void gotoAngleControl();                      // Navigate to angle
   
@@ -102,8 +105,10 @@ public:
   void setGotoAngle(float angle);
   void setLinePID(float kp, float ki, float kd);
   void setBaseSpeed(int speed);
+  void setIRSumThreshold(int threshold);       // Set IR sum threshold
   
   void resetRelative();                         // Reset rel_s, rel_theta
+
 };
 
 #endif // ROBOT_H

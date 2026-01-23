@@ -86,74 +86,49 @@ void read_encoders(void)
 // PWM MOTOR CONTROL 
 // ============================================================================
 
-//L298N
-// void setMotorPWM(int new_PWM, int pin_a, int pin_b, int pin_en)
-// {
-//   int PWM_max = 200;
-//   if (new_PWM >  PWM_max) new_PWM =  PWM_max;
-//   if (new_PWM < -PWM_max) new_PWM = -PWM_max;
-  
-//   if (new_PWM == 0) {
-//     // Motor parado
-//     digitalWrite(pin_a, LOW);
-//     digitalWrite(pin_b, LOW);
-//     analogWrite(pin_en, 0);
-//   } else if (new_PWM > 0) {
-//     // Motor frente
-//     digitalWrite(pin_a, HIGH);
-//     digitalWrite(pin_b, LOW);
-//     analogWrite(pin_en, abs(new_PWM));
-//   } else {
-//     // Motor ré
-//     digitalWrite(pin_a, LOW);
-//     digitalWrite(pin_b, HIGH);
-//     analogWrite(pin_en, abs(new_PWM));
-//   }
-// }
-
-
-//ZK-5AD
-// void setMotorPWM(int new_PWM, int pin_d0, int pin_d1)
+// void setMotorPWM(int new_PWM, int pin_a, int pin_b)
 // {
 //   // Limita PWM entre -255 e +255
 //   new_PWM = constrain(new_PWM, -255, 255);
   
 //   if (new_PWM == 0) {
-//     // PARADO - Ambos LOW (brake mode)
-//     digitalWrite(pin_d0, LOW);
-//     digitalWrite(pin_d1, LOW);
+//     // Motor parado
+//     digitalWrite(pin_a, LOW);
+//     digitalWrite(pin_b, LOW);
     
 //   } else if (new_PWM > 0) {
-//     // FRENTE - D0 recebe PWM, D1 fica LOW
-//     analogWrite(pin_d0, abs(new_PWM));
-//     digitalWrite(pin_d1, LOW);
+    
+//     analogWrite(pin_a, abs(new_PWM));
+//     digitalWrite(pin_b, LOW);
     
 //   } else {
-//     // RÉ - D0 fica LOW, D1 recebe PWM
-//     digitalWrite(pin_d0, LOW);
-//     analogWrite(pin_d1, abs(new_PWM));
+//     // Motor ré
+//     digitalWrite(pin_a, LOW);
+//     analogWrite(pin_b, abs(new_PWM));
 //   }
 // }
 
 void setMotorPWM(int new_PWM, int pin_a, int pin_b)
 {
-  // Limita PWM entre -255 e +255
-  new_PWM = constrain(new_PWM, -255, 255);
+  int PWM_max = 200;
+  if (new_PWM >  PWM_max) new_PWM =  PWM_max;
+  if (new_PWM < -PWM_max) new_PWM = -PWM_max;
   
-  if (new_PWM == 0) {
-    // Motor parado
-    digitalWrite(pin_a, LOW);
-    digitalWrite(pin_b, LOW);
-    
-  } else if (new_PWM > 0) {
-    
-    analogWrite(pin_a, abs(new_PWM));
-    digitalWrite(pin_b, LOW);
-    
-  } else {
-    // Motor ré
-    digitalWrite(pin_a, LOW);
-    analogWrite(pin_b, abs(new_PWM));
+  if (new_PWM == 0) 
+  {  // Both outputs 0 -> A = H, B = H
+    analogWrite(pin_a, 255);
+    analogWrite(pin_b, 255);
+
+  } else if (new_PWM > 0) 
+  {
+    analogWrite(pin_a, 255 - new_PWM);
+    analogWrite(pin_b, 255);
+
+  } 
+  else 
+  {
+    analogWrite(pin_a, 255);
+    analogWrite(pin_b, 255 + new_PWM);
   }
 }
 
@@ -248,23 +223,6 @@ void printMazeStatus()
   }
   
   out.println("================================\n");
-}
-
-void printFollowStatus()
-{
-  out.println("\n=== FOLLOW MODE - U-TURN ===");
-  out.print("State: ");
-  
-  switch (followMode.getState()) {
-    case FOLLOW_IDLE: out.println("IDLE"); break;
-    case FOLLOW_LINE: out.println("FOLLOWING"); break;
-    case FOLLOW_LOST: out.println("LOST"); break;
-  }
-  
-  out.print("Time: ");
-  out.print(followMode.getTimeInState());
-  out.println(" ms");
-  out.println("=============================\n");
 }
 
 // ============================================================================
@@ -458,7 +416,7 @@ void process_command(frame_data_t frame)
   }
   
   else if (frame.command_is("m2")) {
-    robot.PWM_2_req = frame.value;
+    robot.PWM_2_req = frame.value * 1.05;
     robot.control_mode = cm_pwm;
   }
   
@@ -695,7 +653,6 @@ void loop()
       // Print status on state change or every 2 seconds
       if (followMode.getState() != last_printed_follow_state || 
           now - last_follow_update > 2000) {
-        printFollowStatus();
         last_printed_follow_state = followMode.getState();
         last_follow_update = now;
       }
@@ -789,8 +746,8 @@ void loop()
         robot.lineFollowControl();
     }
     else {
-        robot.v = robot.v_req;
-        robot.w = robot.w_req;
+        // robot.v = robot.v_req;
+        // robot.w = robot.w_req;
         robot.VWToMotorsVoltage();
     }
 

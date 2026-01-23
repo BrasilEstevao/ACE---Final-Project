@@ -57,16 +57,19 @@ robot_t::robot_t()
   PID1.dt = dt;
   PID2.dt = dt;
   
-  // Line following 
+  // Line following - WEIGHTED ERROR METHOD (do IRLine)
   line_sensor = NULL;
   line_kp = LINE_KP;
   line_ki = LINE_KI;
   line_kd = LINE_KD;
-  line_last_error = 0;
+  line_error = 0;
+  line_prev_error = 0;
   line_integral = 0;
+  line_derivative = 0;
   base_speed = BASE_SPEED;
+  ir_sum_threshold = 2500;
   
-  // Goto targets (NEW)
+  // Goto targets
   target_distance = 0;
   target_angle = 0;
 }
@@ -185,39 +188,82 @@ void robot_t::VWToMotorsVoltage(void)
 }
 
 // ============================================================================
-// LINE FOLLOWING CONTROL 
+// LINE FOLLOWING CONTROL - WEIGHTED ERROR METHOD (do código IRLine)
 // ============================================================================
+
 
 void robot_t::lineFollowControl()
 {
+ 
   if (!line_sensor) {
     PWM_1 = 0;
     PWM_2 = 0;
     return;
   }
-  
+
   int position = line_sensor->getPosition();
-  int error = position;
+  line_error = position; 
+
+
+  float p_term = line_kp * line_error;
+  float i_term = line_ki * line_integral;
+  float d_term = line_kd * line_derivative;
+    
+  float correction = p_term + i_term + d_term;
   
-  // PID calculation
-  line_integral += error;
-  line_integral = constrain(line_integral, -10000, 10000);
-  
-  int derivative = error - line_last_error;
-  line_last_error = error;
-  
-  float correction = line_kp * error + line_ki * line_integral + line_kd * derivative;
+  if (fabs(correction) < MAX_CORRECTION) {
+        line_integral += line_error;
+        line_integral = constrain(line_integral, -5000, 5000);
+  }
 
   correction = constrain(correction, -MAX_CORRECTION, MAX_CORRECTION);
 
-  // Apply differential steering
-  int leftSpeed = base_speed - correction;
-  int rightSpeed = base_speed + correction;
+  line_derivative = line_error - line_prev_error;
+  line_prev_error = line_error;
   
+
+  // int adaptive_speed = base_speed;
+  //   if (fabs(line_error) > 500) {
+  //       adaptive_speed = base_speed * 0.7;
+  //   }
+
+ 
+  int leftSpeed = base_speed + correction;
+  int rightSpeed = base_speed - correction;
+  
+ 
   PWM_1 = constrain(leftSpeed, -MAX_SPEED, MAX_SPEED);
   PWM_2 = constrain(rightSpeed, -MAX_SPEED, MAX_SPEED);
-}
 
+  
+  static int debug_counter = 0;
+  if (debug_counter++ % 5 == 0) { 
+    
+    Serial.print("RAW:[");
+    for(int i=0; i<5; i++) {
+      Serial.print(line_sensor->getAnalogSensorValue(i));
+      if (i < 4) Serial.print(","); 
+    }
+    Serial.print("] POS:");
+    Serial.print(position);
+    
+    Serial.print(" | P:");
+    Serial.print(p_term, 1); 
+    Serial.print(" I:");
+    Serial.print(i_term, 1);
+    Serial.print(" D:");
+    Serial.print(d_term, 1);
+    // ------------------------------------------
+
+    Serial.print(" | CORR:");
+    Serial.print(correction, 1);
+    Serial.print(" PWM:[");
+    Serial.print(PWM_1);
+    Serial.print(",");
+    Serial.print(PWM_2);
+    Serial.println("]");
+  }
+}
 // ============================================================================
 // GOTO DISTANCE CONTROL 
 // ============================================================================
@@ -339,6 +385,11 @@ void robot_t::setLinePID(float kp, float ki, float kd)
 void robot_t::setBaseSpeed(int speed)
 {
   base_speed = constrain(speed, 0, 255);
+}
+
+void robot_t::setIRSumThreshold(int threshold)
+{
+  ir_sum_threshold = threshold;
 }
 
 void robot_t::resetRelative()

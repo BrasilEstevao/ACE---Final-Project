@@ -38,10 +38,7 @@ LineSensor::LineSensor()
 
 void LineSensor::setMuxChannel(int channel)
 {
-    // Set MUX control pins (A, B, C) to select channel
-    digitalWrite(MUXA_PIN, channel & 1);
-    digitalWrite(MUXB_PIN, (channel >> 1) & 1);
-    digitalWrite(MUXC_PIN, (channel >> 2) & 1);
+	gpio_put_masked(digitalPinToBitMask(MUXA_PIN) | digitalPinToBitMask(MUXB_PIN) | digitalPinToBitMask(MUXC_PIN), channel << MUXA_PIN);// This function (from the Raspberry Pi Pico SDK) sets several GPIO pins at once using a bitmask.
 }
 
 uint16_t LineSensor::readMuxChannel(int channel)
@@ -59,9 +56,10 @@ void LineSensor::read()
 {
     // Read all 5 IR sensors through multiplexer
     // Channels 3-7 on the MUX
-    for (int i = 0; i < IR_SENSOR_COUNT; i++) {
+    byte c;
+    for (c = 0; c < IR_SENSOR_COUNT; c++) {
         // Read and invert (1023 - value) so black = high
-        _analogSensors[IR_SENSOR_COUNT - 1 - i] = 1023 - readMuxChannel(IR_MUX_START_CH + i);
+        _analogSensors[(IR_SENSOR_COUNT - 1) - c] = 1023 - readMuxChannel(IR_MUX_START_CH + c);
     }
 }
 
@@ -128,9 +126,17 @@ void LineSensor::calibrate()
 }
 
 // ============================================================================
-// LINE POSITION - Using IRLine algorithm
+// LINE POSITION 
 // ============================================================================
 
+
+
+int LineSensor::IR_sum()
+{
+  return _analogSensors[0] + _analogSensors[1] + _analogSensors[2] + _analogSensors[3] + _analogSensors[4];
+}
+
+  
 void LineSensor::calcLineEdgeLeft()
 {
     bool found = false;
@@ -184,14 +190,14 @@ int LineSensor::getPosition()
     
     long weighted_sum = 0;
     long sum = 0;
-    int weights[5] = {-2, -1, 0, 1, 2};
+    double weights[5] = {-1.1, -1, 0, 1, 1.1};
     
     for (int i = 0; i < IR_SENSOR_COUNT; i++) {
         int v = _analogSensors[i] - _waterLevel;
         if (v < 0) v = 0;
         
         if (v > _threshold) {
-            weighted_sum += (long)v * weights[i] * 500;
+            weighted_sum += (long)v * weights[i]*500;
             sum += v;
         }
     }
