@@ -40,6 +40,8 @@ void FollowMode::update(JunctionType current_junction, float rel_angle, float re
     case FOLLOW_LOST:
       next_state = transitionLost(current_junction, rel_angle);
       break;
+    case FOLLOW_BLOCKED:
+      next_state = transitionBlocked();
   }
   
   // Change state if needed
@@ -60,14 +62,18 @@ FollowState FollowMode::transitionIdle()
 
 FollowState FollowMode::transitionFollowing(JunctionType junction)
 {
-  switch (junction) {
 
-    case JUNCTION_LOST:
-      Serial.println("[FOLLOW] Lost line - turning around");
-      return FOLLOW_LOST;
-      
-    case JUNCTION_NONE:
-    case JUNCTION_CROSS:
+  if(JUNCTION_LOST == junction)
+  {
+    Serial.println("[FOLLOW] Lost line");
+    return FOLLOW_LOST;
+  }
+
+  switch(_Sonar1->getState()) {
+    case SONAR_OBSTRUCTED:
+      Serial.println("[FOLLOW] Path blocked - stopping");
+      return FOLLOW_BLOCKED;
+    case SONAR_CLEAR:
     default:
       return FOLLOW_LINE;
   }
@@ -84,6 +90,18 @@ FollowState FollowMode::transitionLost(JunctionType junction, float rel_angle)
   return FOLLOW_LOST;
 }
 
+FollowState FollowMode::transitionBlocked()
+{
+  switch(_Sonar1->getState()) {
+    case SONAR_CLEAR:
+      Serial.println("[FOLLOW] Path clear - resuming line following");
+      return FOLLOW_LINE;
+    case SONAR_OBSTRUCTED:
+    default:
+  return FOLLOW_BLOCKED;
+  }
+}
+
 
 // ============================================================================
 // STATE OUTPUTS 
@@ -97,6 +115,11 @@ bool FollowMode::shouldFollowLine()
 bool FollowMode::shouldSpiral()
 {
   return state == FOLLOW_LOST;
+}
+
+bool FollowMode::shouldStop()
+{
+  return state == FOLLOW_BLOCKED;
 }
 
 // ============================================================================
