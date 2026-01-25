@@ -65,8 +65,8 @@ void WiFiTerminal::update()
 {
     if (!_server) return;
     
-    // Check for new client
-    WiFiClient newClient = _server->available();
+    // ✅ CORRIGIDO: Usar accept() em vez de available()
+    WiFiClient newClient = _server->accept();
     
     if (newClient) {
         // Disconnect previous client if exists
@@ -167,7 +167,7 @@ void WiFiTerminal::println()
 }
 
 // ============================================================================
-// DATA RECEPTION 
+// DATA RECEPTION
 // ============================================================================
 
 int WiFiTerminal::available()
@@ -224,7 +224,7 @@ String WiFiTerminal::readLine()
             continue;
         }
         
-        // Add printable characters (NO ECHO - Telnet client handles it)
+        // Add printable characters
         if (c >= 32 && c <= 126) {
             _commandBuffer += c;
         }

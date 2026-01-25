@@ -1,678 +1,678 @@
 #include <Arduino.h>
+#include <RPi_Pico_TimerInterrupt.h>
 #include "config.h"
-#include "L298NMotor.h"
+#include "robot.h"
 #include "LineSensor.h"
-#include "Odometry.h"
-#include "RobotStateMachine.h"
+#include "follow_mode.h"
+#include "maze_solver.h"
+#include "commands.h"
 #include "WiFiTerminal.h"
+#include <HCSR04.h>
+#include "Sonar.h"
+
+// ============================================================================
+// TIMER INTERRUPT
+// ============================================================================
+
+RPI_PICO_Timer ITimer1(1);
+
+#define TEST_PIN 27
+
+// Encoder pins defined in config.h
+// Motors pins defined in config.h
+
+volatile int encoder1_pos = 0;
+volatile int encoder2_pos = 0;
+
+int enc1, enc2;
+
+int encoder1_state, encoder2_state;
+
+
+int encoder_table[16] = {0, 1, -1, 0, -1, 0, 0, 1, 1, 0, 0, -1, 0, -1, 1, 0}; 
+
+volatile int count;
+int act_count;
+
+#define digitalWriteFast(pin, val)  (val ? sio_hw->gpio_set = (1 << pin) : sio_hw->gpio_clr = (1 << pin))
+#define digitalReadFast(pin)        (((1 << pin) & sio_hw->gpio_in) >> pin)
+#define pinIsHigh(pin, pins)        (((1 << pin) & pins) >> pin)
+
+// ============================================================================
+// TIMER INTERRUPT HANDLER 
+// ============================================================================
+
+bool timer_handler(struct repeating_timer *t)
+{
+  int next_state, table_input, pins;
+  digitalWriteFast(TEST_PIN, 1);
+
+  pins = sio_hw->gpio_in;  // Just one read to get all pins
+
+  next_state = pinIsHigh(ENC1_A, pins) << 1;
+  next_state |= pinIsHigh(ENC1_B, pins);
+
+  table_input = (encoder1_state << 2) | next_state;
+  encoder1_pos += encoder_table[table_input];
+  encoder1_state = next_state;
+
+  next_state = pinIsHigh(ENC2_A, pins) << 1;
+  next_state |= pinIsHigh(ENC2_B, pins);
+  
+  table_input = (encoder2_state << 2) | next_state;
+  encoder2_pos -= encoder_table[table_input];
+  encoder2_state = next_state;
+
+  count++;
+  digitalWriteFast(TEST_PIN, 0);
+  return true;
+}
+
+// ============================================================================
+// READ ENCODERS 
+// ============================================================================
+
+void read_encoders(void)
+{
+  noInterrupts();
+  
+  enc1 = encoder1_pos;
+  enc2 = encoder2_pos;
+  act_count = count;
+
+  encoder1_pos = 0;
+  encoder2_pos = 0;
+  count = 0;
+
+  interrupts();
+}
+
+// ============================================================================
+// PWM MOTOR CONTROL 
+// ============================================================================
+
+void setMotorPWM(int new_PWM, int pin_d0, int pin_d1)
+{
+  // Limita PWM entre -255 e +255
+  new_PWM = constrain(new_PWM, -255, 255);
+  
+  if (new_PWM == 0) {
+    // PARADO - Ambos LOW (brake mode)
+    digitalWrite(pin_d0, LOW);
+    digitalWrite(pin_d1, LOW);
+    
+  } else if (new_PWM > 0) {
+    // FRENTE - D0 recebe PWM, D1 fica LOW
+    analogWrite(pin_d0, abs(new_PWM));
+    digitalWrite(pin_d1, LOW);
+    
+  } else {
+    // RÉ - D0 fica LOW, D1 recebe PWM
+    digitalWrite(pin_d0, LOW);
+    analogWrite(pin_d1, abs(new_PWM));
+  }
+}
+
 
 // ============================================================================
 // GLOBAL OBJECTS
 // ============================================================================
 
-L298NMotor leftMotor(MOTOR1_IN1, MOTOR1_IN2, MOTOR1_EN);
-L298NMotor rightMotor(MOTOR2_IN3, MOTOR2_IN4, MOTOR2_EN);
+robot_t robot;
 LineSensor lineSensor;
-Odometry odometry(WHEEL_DISTANCE, WHEEL_RADIUS);
-RobotStateMachine robot(&leftMotor, &rightMotor, &lineSensor, &odometry);
+FollowMode followMode;
+Sonar Sonar1;
+MazeSolver Mazesolver;
+commands_t serial_commands;
 WiFiTerminal terminal;
 
 // ============================================================================
-// TIMING VARIABLES
+// TIMING 
 // ============================================================================
 
-unsigned long lastLoopTime = 0;
-unsigned long lastStatusTime = 0;
-unsigned long lastSensorPrintTime = 0;
-bool sensorStreamEnabled = false;
-bool odomStreamEnabled = false;
+unsigned long interval, last_cycle;
+unsigned long loop_micros;
 
 // ============================================================================
-// TERMINAL OUTPUT WRAPPER
+// MODE FLAGS
+// ============================================================================
+
+bool follow_mode_active = false;
+bool maze_mode_active = false;
+bool sensor_stream = false;
+bool odom_stream = false;
+
+// ============================================================================
+// DUAL OUTPUT (Serial + WiFi)
 // ============================================================================
 
 class DualOutput {
 public:
-    void print(const char* str) {
-        Serial.print(str);
-        terminal.print(str);
-    }
-    
-    void println(const char* str) {
-        Serial.println(str);
-        terminal.println(str);
-    }
-    
-    void print(const String& str) {
-        Serial.print(str);
-        terminal.print(str);
-    }
-    
-    void println(const String& str) {
-        Serial.println(str);
-        terminal.println(str);
-    }
-    
-    void print(int val) {
-        Serial.print(val);
-        terminal.print(val);
-    }
-    
-    void println(int val) {
-        Serial.println(val);
-        terminal.println(val);
-    }
-    
-    void print(float val, int decimals = 2) {
-        Serial.print(val, decimals);
-        terminal.print(val, decimals);
-    }
-    
-    void println(float val, int decimals = 2) {
-        Serial.println(val, decimals);
-        terminal.println(val, decimals);
-    }
-    
-    void println() {
-        Serial.println();
-        terminal.println();
-    }
-} output;
+  void print(const char* s) { Serial.print(s); terminal.print(s); }
+  void println(const char* s) { Serial.println(s); terminal.println(s); }
+  void print(String s) { Serial.print(s); terminal.print(s); }
+  void println(String s) { Serial.println(s); terminal.println(s); }
+  void print(int v) { Serial.print(v); terminal.print(v); }
+  void println(int v) { Serial.println(v); terminal.println(v); }
+  void print(float v, int d=2) { Serial.print(v,d); terminal.print(v,d); }
+  void println(float v, int d=2) { Serial.println(v,d); terminal.println(v,d); }
+  void println() { Serial.println(); terminal.println(); }
+} out;
 
 // ============================================================================
 // COMMAND PROCESSING
 // ============================================================================
 
-void processCommand(String cmd) {
-    cmd.trim();
-    cmd.toLowerCase();
+void process_command(frame_data_t frame)
+{
+  if (frame.command_is("help")) {
+    out.println("\n=== ROBOT COMMANDS ===");
+    out.println("Basic:");
+    out.println("  stop          - Stop robot");
+    out.println("  status        - Show status");
+    out.println("");
+    out.println("Line Following:");
+    out.println("  follow        - Start line following");
+    out.println("  linepid <p> <i> <d>");
+    out.println("  speed <n>     - Base speed");
+    out.println("");
+    out.println("Maze:");
+    out.println("  maze          - Start maze solving");
+    out.println("  mazestop      - Stop maze");
+    out.println("");
+    out.println("Navigation:");
+    out.println("  forward <m>   - Move distance");
+    out.println("  turn <deg>    - Turn angle");
+    out.println("  vel <v> <w>   - Set velocity");
+    out.println("");
+    out.println("Velocity PID:");
+    out.println("  kf <n>        - Set Kf");
+    out.println("  kp <n>        - Set Kp");
+    out.println("  ki <n>        - Set Ki");
+    out.println("");
+    out.println("Direct Control:");
+    out.println("  m1 <pwm>      - Motor 1 PWM");
+    out.println("  m2 <pwm>      - Motor 2 PWM");
+    out.println("  mo <n>        - Mode (0=pwm, 1=pid)");
+    out.println("");
+    out.println("Sensors:");
+    out.println("  sensors       - Show sensors");
+    out.println("  stream <on|off>");
+    out.println("  calibrate");
+    out.println("");
+    out.println("Odometry:");
+    out.println("  odom          - Show odometry");
+    out.println("  ostream <on|off>");
+    out.println("  resetodom");
+    out.println("===================\n");
+  }
+  
+  else if (frame.command_is("stop")) {
+    maze_mode_active = false;
+    follow_mode_active = false;
+    robot.control_mode = cm_pwm;
+    robot.v_req = 0;
+    robot.w_req = 0;
+    robot.PWM_1 = 0;
+    robot.PWM_2 = 0;
     
-    if (cmd == "help" || cmd == "?") {
-        output.println("\n========== AVAILABLE COMMANDS ==========");
-        output.println("help           - Show this help");
-        output.println("start          - Start robot");
-        output.println("stop           - Stop robot");
-        output.println("status         - Show status");
-        output.println("sensors        - Show sensor values once");
-        output.println("stream on/off  - Stream sensors continuously");
-        output.println("odom           - Show odometry values once");
-        output.println("ostream on/off - Stream odometry continuously");
-        output.println("resetodom      - Reset odometry to zero");
-        output.println("calibrate      - Calibrate analog sensors");
-        output.println("");
-        output.println("=== VELOCITY CONTROL MODE ===");
-        output.println("vel <v> <w>    - Set velocity (v in m/s, w in rad/s)");
-        output.println("               Example: vel 0.2 0.5");
-        output.println("               v > 0 = forward, v < 0 = backward");
-        output.println("               w > 0 = turn right, w < 0 = turn left");
-        output.println("");
-        output.println("=== GOTO COMMANDS ===");
-        output.println("forward <m>    - Move forward/back specific distance");
-        output.println("               Example: forward 0.5  (50cm forward)");
-        output.println("               Example: forward -0.3 (30cm backward)");
-        output.println("turn <deg>     - Turn specific angle");
-        output.println("               Example: turn 90   (90Â° right)");
-        output.println("               Example: turn -180 (180Â° left)");
-        output.println("");
-        output.println("=== CONFIGURATION ===");
-        output.println("speed <n>      - Set speed (0-255)");
-        output.println("mode <n>       - Set mode:");
-        output.println("                 1=follow, 3=maze, 4=velocity");
-        output.println("pid <p> <i> <d> - Set PID gains for line sensors");
-        output.println("threshold <n>  - Set sensor threshold");
-        output.println("motors <l> <r> - Test motors directly");
-        output.println("velpid <gains> - Tune velocity PID controller");
-        output.println("               6 params: kp_v ki_v kd_v kp_w ki_w kd_w");
-        output.println("               Example: velpid 50 10 5 20 2 1");
-        output.println("               Units: m/s for v, rad/s for w");
-        output.println("pidmode <on|off> - Toggle PID velocity control");
-        output.println("                 on  = closed-loop (uses odometry)");
-        output.println("                 off = open-loop (direct PWM)");
-        output.println("========================================\n");
-    }
-    else if (cmd == "start") {
-        robot.start();
-        output.println(">>> Robot STARTED (odometry reset)");
-    }
-    else if (cmd == "stop") {
-        robot.stop();
-        output.println(">>> Robot STOPPED");
-    }
-    else if (cmd == "status") {
-        output.println("\n--- Robot Status ---");
-        
-        output.print("State: ");
-        RobotState currentState = robot.getState();
-        switch(currentState) {
-            case STATE_IDLE: output.print("IDLE"); break;
-            case STATE_LINE_FOLLOW: output.print("LINE_FOLLOW"); break;
-            case STATE_SMALL_FORWARD: output.print("SMALL_FWD"); break;
-            case STATE_TURN_LEFT: output.print("TURN_LEFT"); break;
-            case STATE_TURN_RIGHT: output.print("TURN_RIGHT"); break;
-            case STATE_TURN_AROUND: output.print("TURN_AROUND"); break;
-            case STATE_LOST: output.print("LOST"); break;
-            default: output.print("UNKNOWN"); break;
-        }
-        output.println();
-        
-        output.print("Speed: L=");
-        output.print(leftMotor.getSpeed());
-        output.print(" R=");
-        output.println(rightMotor.getSpeed());
-        
-        output.print("Position: x=");
-        output.print(odometry.getX(), 3);
-        output.print("m y=");
-        output.print(odometry.getY(), 3);
-        output.print("m Angle=");
-        output.print(odometry.getTheta() * 180.0f / PI, 1);
-        output.println("dgs");
-        
-        output.print("Relative: dist=");
-        output.print(odometry.getRelativeDistance(), 3);
-        output.print("m angle=");
-        output.print(odometry.getRelativeAngle() * 180.0f / PI, 1);
-        output.println("Â°");
-        
-        output.print("Threshold: ");
-        output.println(lineSensor.getThreshold());
-        output.println("--------------------\n");
-
-        output.print("Control Mode: ");
-        output.println(robot.isPIDControlEnabled() ? "PID (closed-loop)" : "DIRECT (open-loop)");
-    }
-    else if (cmd == "sensors") {
-        lineSensor.read();
-        
-        output.print("D: [");
-        output.print(lineSensor.getDigitalSensorValue(0) ? "B" : "W"); 
-        output.print("] A: [");
-        output.print(lineSensor.getAnalogSensorValue(0)); 
-        output.print(",");
-        output.print(lineSensor.getAnalogSensorValue(1)); 
-        output.print(",");
-        output.print(lineSensor.getAnalogSensorValue(2)); 
-        output.print("] D: [");
-        output.print(lineSensor.getDigitalSensorValue(1) ? "B" : "W");
-        output.print("] Pos: ");
-        output.print(lineSensor.getPosition());
-        output.print(" | ");
-        
-        JunctionType j = lineSensor.detectJunction();
-        switch(j) {
-            case JUNCTION_NONE: output.println("LINE"); break;
-            case JUNCTION_LEFT: output.println("LEFT"); break;
-            case JUNCTION_RIGHT: output.println("RIGHT"); break;
-            case JUNCTION_T: output.println("T"); break;
-            case JUNCTION_CROSS: output.println("CROSS"); break;
-            case JUNCTION_LOST: output.println("LOST"); break;
-        }
-    }
-    else if (cmd == "odom") {
-        output.print("Position: x=");
-        output.print(odometry.getX(), 3);
-        output.print("m y=");
-        output.print(odometry.getY(), 3);
-        output.print("m Î¸=");
-        output.print(odometry.getTheta() * 180.0f / PI, 1);
-        output.println("Â°");
-        
-        output.print("Velocity: v=");
-        output.print(odometry.getVelocity(), 3);
-        output.print("m/s w=");
-        output.print(odometry.getAngularVelocity(), 2);
-        output.println("rad/s");
-        
-        output.print("Relative: dist=");
-        output.print(odometry.getRelativeDistance(), 3);
-        output.print("m angle=");
-        output.print(odometry.getRelativeAngle() * 180.0f / PI, 1);
-        output.println("Â°");
-        
-        output.print("Encoders: L=");
-        output.print(odometry.getLeftEncoder());
-        output.print(" R=");
-        output.println(odometry.getRightEncoder());
-    }
-    else if (cmd == "resetodom") {
-        odometry.reset();
-        output.println(">>> Odometry RESET to zero");
-    }
-    else if (cmd.startsWith("vel ")) {
-        int space = cmd.indexOf(' ', 4);
-        if (space > 0) {
-            float v = cmd.substring(4, space).toFloat();
-            float w = cmd.substring(space + 1).toFloat();
-            
-            // Switch to velocity control mode if not already
-            if (robot.getMode() != MODE_VELOCITY_CONTROL) {
-                robot.setMode(MODE_VELOCITY_CONTROL);
-                output.println(">>> Switched to VELOCITY_CONTROL mode");
-            }
-            
-            robot.setVelocity(v, w);
-            output.print(">>> Velocity set: v=");
-            output.print(v, 3);
-            output.print(" m/s, w=");
-            output.print(w, 3);
-            output.println(" rad/s");
-            
-            // Show what this means
-            if (v > 0) output.print("    (Moving FORWARD");
-            else if (v < 0) output.print("    (Moving BACKWARD");
-            else output.print("    (STOPPED");
-            
-            if (w > 0) output.println(" while turning RIGHT)");
-            else if (w < 0) output.println(" while turning LEFT)");
-            else output.println(")");
-        }
-        else {
-            output.println(">>> Usage: vel <v> <w>");
-            output.println("    v = linear velocity (m/s)");
-            output.println("    w = angular velocity (rad/s)");
-            output.println("    Example: vel 0.2 0    (forward at 0.2 m/s)");
-            output.println("    Example: vel 0 0.5    (spin right at 0.5 rad/s)");
-            output.println("    Example: vel 0.1 -0.3 (forward + turn left)");
-        }
-    }
-    else if (cmd.startsWith("forward ")) {
-        float distance = cmd.substring(8).toFloat();
-        robot.gotoDistance(distance);
-        output.print(">>> Moving ");
-        if (distance >= 0) {
-            output.print("FORWARD ");
-        } else {
-            output.print("BACKWARD ");
-        }
-        output.print(fabs(distance) * 100.0f, 1);
-        output.println(" cm");
-    }
-    else if (cmd.startsWith("turn ")) {
-        float degrees = cmd.substring(5).toFloat();
-        float radians = degrees * PI / 180.0f;
-        robot.gotoAngle(radians);
-        output.print(">>> Turning ");
-        if (degrees >= 0) {
-            output.print("RIGHT ");
-        } else {
-            output.print("LEFT ");
-        }
-        output.print(fabs(degrees), 1);
-        output.println("Â°");
-    }
-    else if (cmd.startsWith("stream ")) {
-        String option = cmd.substring(7);
-        if (option == "on") {
-            sensorStreamEnabled = true;
-            output.println(">>> Sensor stream ENABLED");
-        } else if (option == "off") {
-            sensorStreamEnabled = false;
-            output.println(">>> Sensor stream DISABLED");
-        }
-    }
-    else if (cmd.startsWith("ostream ")) {
-        String option = cmd.substring(8);
-        if (option == "on") {
-            odomStreamEnabled = true;
-            output.println(">>> Odometry stream ENABLED");
-        } else if (option == "off") {
-            odomStreamEnabled = false;
-            output.println(">>> Odometry stream DISABLED");
-        }
-    }
-    else if (cmd == "calibrate") {
-        output.println("\n>>> CALIBRATION MODE <<<");
-        output.println("Move robot over BLACK and WHITE surfaces");
-        output.println("Calibrating in 3 seconds...");
-        delay(3000);
-        
-        robot.stop();
-        
-        output.println("Calibrating...");
-        lineSensor.calibrate();
-        
-        output.println(">>> Calibration complete!");
-        output.print("Threshold: ");
-        output.println(lineSensor.getThreshold());
-    }
-    else if (cmd.startsWith("speed ")) {
-        int speed = cmd.substring(6).toInt();
-        robot.setSpeed(speed);
-        output.print(">>> Speed set to ");
-        output.println(speed);
-    }
-    else if (cmd.startsWith("mode ")) {
-        int mode = cmd.substring(5).toInt();
-        switch(mode) {
-            case 1:
-                robot.setMode(MODE_LINE_FOLLOW);
-                output.println(">>> Mode: LINE_FOLLOW");
-                break;
-            case 3:
-                robot.setMode(MODE_MAZE_SOLVE);
-                output.println(">>> Mode: MAZE_SOLVE");
-                break;
-            case 4:
-                robot.setMode(MODE_VELOCITY_CONTROL);
-                output.println(">>> Mode: VELOCITY_CONTROL");
-                output.println("    Use 'vel <v> <w>' to control");
-                output.println("    v = linear velocity (m/s)");
-                output.println("    w = angular velocity (rad/s)");
-                break;
-            default:
-                output.println(">>> ERROR: Invalid mode");
-                output.println("    1 = LINE_FOLLOW");
-                output.println("    3 = MAZE_SOLVE");
-                output.println("    4 = VELOCITY_CONTROL");
-        }
-    }
-    else if (cmd.startsWith("pid ")) {
-        int space1 = cmd.indexOf(' ', 4);
-        int space2 = cmd.indexOf(' ', space1 + 1);
-        
-        if (space1 > 0 && space2 > 0) {
-            float kp = cmd.substring(4, space1).toFloat();
-            float ki = cmd.substring(space1 + 1, space2).toFloat();
-            float kd = cmd.substring(space2 + 1).toFloat();
-            
-            robot.setPID(kp, ki, kd);
-            output.print(">>> PID set to: Kp=");
-            output.print(kp, 3);
-            output.print(" Ki=");
-            output.print(ki, 3);
-            output.print(" Kd=");
-            output.println(kd, 3);
-        }
-        else {
-            output.println(">>> Usage: pid <kp> <ki> <kd>");
-        }
-    }
-    else if (cmd.startsWith("threshold ")) {
-        int threshold = cmd.substring(10).toInt();
-        lineSensor.setThreshold(threshold);
-        output.print(">>> Threshold set to ");
-        output.println(threshold);
-    }
-    else if (cmd.startsWith("motors ")) {
-        int space = cmd.indexOf(' ', 7);
-        if (space > 0) {
-            int left = cmd.substring(7, space).toInt();
-            int right = cmd.substring(space + 1).toInt();
-            
-            robot.stop();
-            leftMotor.setSpeed(left);
-            rightMotor.setSpeed(right);
-            
-            output.print(">>> Motors: L=");
-            output.print(left);
-            output.print(" R=");
-            output.println(right);
-            output.println("    (Type 'stop' to resume robot control)");
-        }
-        else {
-            output.println(">>> Usage: motors <left> <right>");
-        }
-    }
-    // ============================================================================
-// ADICIONE ESTES COMANDOS NA FUNÃ‡ÃƒO processCommand() do main.cpp
-// ============================================================================
-
-    else if (cmd.startsWith("velpid ")) {
-        // Formato: velpid <kp_v> <ki_v> <kd_v> <kp_w> <ki_w> <kd_w>
-        int spaces[5];
-        int spaceCount = 0;
-        int pos = 7;
-        
-        while (spaceCount < 5 && pos < cmd.length()) {
-            pos = cmd.indexOf(' ', pos);
-            if (pos > 0) {
-                spaces[spaceCount++] = pos;
-                pos++;
-            } else {
-                break;
-            }
-        }
-        
-        if (spaceCount == 5) {
-            float kp_v = cmd.substring(7, spaces[0]).toFloat();
-            float ki_v = cmd.substring(spaces[0] + 1, spaces[1]).toFloat();
-            float kd_v = cmd.substring(spaces[1] + 1, spaces[2]).toFloat();
-            float kp_w = cmd.substring(spaces[2] + 1, spaces[3]).toFloat();
-            float ki_w = cmd.substring(spaces[3] + 1, spaces[4]).toFloat();
-            float kd_w = cmd.substring(spaces[4] + 1).toFloat();
-            
-            robot.setVelocityPID(kp_v, ki_v, kd_v, kp_w, ki_w, kd_w);
-            
-            output.println(">>> Velocity PID updated:");
-            output.print("    Linear  (v): Kp=");
-            output.print(kp_v, 1);
-            output.print(" Ki=");
-            output.print(ki_v, 1);
-            output.print(" Kd=");
-            output.println(kd_v, 1);
-            output.print("    Angular (w): Kp=");
-            output.print(kp_w, 1);
-            output.print(" Ki=");
-            output.print(ki_w, 1);
-            output.print(" Kd=");
-            output.println(kd_w, 1);
-        }
-        else {
-            output.println(">>> Usage: velpid <kp_v> <ki_v> <kd_v> <kp_w> <ki_w> <kd_w>");
-            output.println("    Example: velpid 50 10 5 20 2 1");
-            output.println("    Current defaults:");
-            output.println("      Linear  (v): Kp=50  Ki=10  Kd=5");
-            output.println("      Angular (w): Kp=20  Ki=2   Kd=1");
-            output.println("    NOTE: Gains are in m/s and rad/s units");
-        }
-    }
-    else if (cmd.startsWith("pidmode ")) {
-        String mode = cmd.substring(8);
-        if (mode == "on" || mode == "1" || mode == "true") {
-            robot.setPIDControlMode(true);
-            output.println(">>> PID velocity control ENABLED (closed-loop)");
-            output.println("    Uses odometry feedback for accurate control");
-        } else if (mode == "off" || mode == "0" || mode == "false") {
-            robot.setPIDControlMode(false);
-            output.println(">>> Direct velocity control ENABLED (open-loop)");
-            output.println("    Converts v/w directly to PWM (no feedback)");
-        } else {
-            output.println(">>> Usage: pidmode <on|off>");
-            output.print("    Current: ");
-            output.println(robot.isPIDControlEnabled() ? "PID (on)" : "DIRECT (off)");
-        }
-    }
-    else if (cmd.length() > 0) {
-        output.println(">>> Unknown command. Type 'help' for list.");
+    followMode.stop();
+    Mazesolver.stop();
+    out.println(">>> STOPPED");
+  }
+  
+  else if (frame.command_is("status")) {
+    out.println("\n--- Status ---");
+    out.print("Mode: ");
+    switch (robot.control_mode) {
+      case cm_pwm: out.println("PWM"); break;
+      case cm_pid: out.println("PID"); break;
+      case cm_line_follow: out.println("LINE_FOLLOW"); break;
+      case cm_goto_distance: out.println("GOTO_DIST"); break;
+      case cm_goto_angle: out.println("GOTO_ANGLE"); break;
     }
     
-    // Prompt for next command
-    output.print("> ");
-}
-
-// ============================================================================
-// SETUP
-// ============================================================================
-
-void setup() {
-    // Initialize Serial
-    Serial.begin(115200);
-    delay(2000);
+    if (maze_mode_active) {
+      out.print("Maze: ");
+      switch (Mazesolver.getState()) {
+        case MAZE_IDLE: out.println("IDLE"); break;
+        case MAZE_FOLLOWING: out.println("FOLLOWING"); break;
+        case MAZE_SMALL_FORWARD: out.println("SMALL_FWD"); break;
+        case MAZE_TURNING_LEFT: out.println("TURN_LEFT"); break;
+        case MAZE_TURNING_RIGHT: out.println("TURN_RIGHT"); break;
+        case MAZE_TURNING_AROUND: out.println("U_TURN"); break;
+        case MAZE_FINISHED: out.println("FINISHED"); break;
+        default: break;
+      }
+    }
     
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, LOW);
+    out.print("PWM: L=");
+    out.print(robot.PWM_1);
+    out.print(" R=");
+    out.println(robot.PWM_2);
     
-    Serial.println("\n========================================");
-    Serial.println(" LINE FOLLOWING ROBOT - WITH ODOMETRY");
-    Serial.println("   Serial + WiFi Terminal");
-    Serial.println("   Raspberry Pi Pico W + L298N");
-    Serial.println("========================================\n");
+    out.print("Pose: x=");
+    out.print(robot.xe, 3);
+    out.print("m y=");
+    out.print(robot.ye, 3);
+    out.print("m θ=");
+    out.print(robot.thetae * 180.0f / PI, 1);
+    out.println("°");
     
-    // Initialize odometry (encoders)
-    Serial.println("[INIT] Setting up odometry...");
-    odometry.begin();
+    out.print("Velocity: v=");
+    out.print(robot.ve, 3);
+    out.print("m/s w=");
+    out.print(robot.we, 2);
+    out.println("rad/s");
     
-    // Initialize WiFi terminal
-    if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
-        Serial.println("[OK] WiFi terminal ready");
+    out.println("--------------\n");
+  }
+  
+  // Line following
+  else if (frame.command_is("follow")) {
+    follow_mode_active = true;
+    maze_mode_active = false;
+    robot.xe = 0;
+    robot.ye = 0;
+    robot.thetae = 0;
+    robot.rel_s = 0;
+    robot.rel_theta = 0;
+    followMode.start();
+    out.println(">>> LINE FOLLOWING started");
+  }
+  
+  else if (frame.command_is("linepid")) {
+    float kp = 0, ki = 0, kd = 0;
+    sscanf(frame.text, "%f %f %f", &kp, &ki, &kd);
+    robot.setLinePID(kp, ki, kd);
+    out.print(">>> Line PID: Kp=");
+    out.print(kp, 2);
+    out.print(" Ki=");
+    out.print(ki, 2);
+    out.print(" Kd=");
+    out.println(kd, 2);
+  }
+  
+  else if (frame.command_is("speed")) {
+    robot.setBaseSpeed((int)frame.value);
+    out.print(">>> Speed: ");
+    out.println((int)frame.value);
+  }
+  
+  // Maze solving
+  else if (frame.command_is("maze")) {
+    maze_mode_active = true;
+    robot.xe = 0;
+    robot.ye = 0;
+    robot.thetae = 0;
+    robot.rel_s = 0;
+    robot.rel_theta = 0;
+    Mazesolver.start();
+    out.println(">>> MAZE SOLVING started");
+  }
+  
+  else if (frame.command_is("mazestop")) {
+    maze_mode_active = false;
+    Mazesolver.stop();
+    robot.control_mode = cm_pwm;
+    robot.PWM_1 = 0;
+    robot.PWM_2 = 0;
+    out.println(">>> MAZE stopped");
+  }
+  
+  // Navigation
+  else if (frame.command_is("forward")) {
+    robot.setGotoDistance(frame.value);
+    out.print(">>> Moving ");
+    out.print(frame.value * 100.0f, 1);
+    out.println(" cm");
+  }
+  
+  else if (frame.command_is("turn")) {
+    float radians = frame.value * PI / 180.0f;
+    robot.setGotoAngle(radians);
+    out.print(">>> Turning ");
+    out.print(frame.value, 1);
+    out.println("°");
+  }
+  
+  else if (frame.command_is("vel")) {
+    float v = 0, w = 0;
+    sscanf(frame.text, "%f %f", &v, &w);
+    robot.setRobotVW(v, w);
+    robot.control_mode = cm_pid;
+    out.print(">>> Velocity: v=");
+    out.print(v, 3);
+    out.print(" w=");
+    out.println(w, 3);
+  }
+  
+ 
+  else if (frame.command_is("m1")) {
+    robot.PWM_1_req = frame.value;
+    robot.control_mode = cm_pwm;
+  }
+  
+  else if (frame.command_is("m2")) {
+    robot.PWM_2_req = frame.value;
+    robot.control_mode = cm_pwm;
+  }
+  
+  else if (frame.command_is("mo")) {
+    robot.control_mode = (control_mode_t) frame.value;
+    out.print(">>> Mode: ");
+    out.println((int)frame.value);
+  }
+  
+  else if (frame.command_is("v")) {
+    robot.v_req = frame.value;
+    robot.control_mode = cm_pid;
+  }
+  
+  else if (frame.command_is("w")) {
+    robot.w_req = frame.value;
+    robot.control_mode = cm_pid;
+  }
+  
+  else if (frame.command_is("kf")) {
+    robot.PID1.Kf = frame.value;
+    robot.PID2.Kf = frame.value;
+    out.print(">>> Kf: ");
+    out.println(frame.value, 2);
+  }
+  
+  else if (frame.command_is("kp")) {
+    robot.PID1.Kp = frame.value;
+    robot.PID2.Kp = frame.value;
+    out.print(">>> Kp: ");
+    out.println(frame.value, 2);
+  }
+  
+  else if (frame.command_is("ki")) {
+    robot.PID1.Ki = frame.value;
+    robot.PID2.Ki = frame.value;
+    out.print(">>> Ki: ");
+    out.println(frame.value, 2);
+  }
+  
+  // Sensors
+  else if (frame.command_is("sensors")) {
+    lineSensor.printValues();
+  }
+  
+  else if (frame.command_is("stream")) {
+    if (strstr(frame.text, "on")) {
+      sensor_stream = true;
+      out.println(">>> Sensor stream ON");
     } else {
-        Serial.println("[ERROR] WiFi terminal failed!");
-        Serial.println("[INFO] Serial terminal still available");
+      sensor_stream = false;
+      out.println(">>> Sensor stream OFF");
     }
-    
-    // Blink LED to show ready
-    for (int i = 0; i < 3; i++) {
-        digitalWrite(LED_BUILTIN, HIGH);
-        delay(100);
-        digitalWrite(LED_BUILTIN, LOW);
-        delay(100);
+  }
+  
+  else if (frame.command_is("calibrate")) {
+    out.println(">>> CALIBRATING...");
+    robot.control_mode = cm_pwm;
+    robot.PWM_1 = 0;
+    robot.PWM_2 = 0;
+    delay(1000);
+    lineSensor.calibrate();
+    out.println(">>> Complete");
+  }
+  
+  // Odometry
+  else if (frame.command_is("odom")) {
+    out.print("x=");
+    out.print(robot.xe, 3);
+    out.print("m y=");
+    out.print(robot.ye, 3);
+    out.print("m θ=");
+    out.print(robot.thetae * 180.0f / PI, 1);
+    out.print("° | v=");
+    out.print(robot.ve, 3);
+    out.print("m/s w=");
+    out.print(robot.we, 2);
+    out.println("rad/s");
+  }
+  
+  else if (frame.command_is("ostream")) {
+    if (strstr(frame.text, "on")) {
+      odom_stream = true;
+      out.println(">>> Odom stream ON");
+    } else {
+      odom_stream = false;
+      out.println(">>> Odom stream OFF");
     }
-    
-    Serial.println("\n========================================");
-    Serial.println("   SETUP COMPLETE - READY!");
-    Serial.println("========================================");
-    Serial.println("Type 'help' for available commands");
-    Serial.println("\nNOTE: Robot now uses ODOMETRY for turns");
-    Serial.println("Calibrate wheel parameters if needed:");
-    Serial.println("  WHEEL_DISTANCE = " + String(WHEEL_DISTANCE, 4) + " m");
-    Serial.println("  WHEEL_RADIUS = " + String(WHEEL_RADIUS, 4) + " m");
-    Serial.println();
-    Serial.print("> ");
+  }
+  
+  else if (frame.command_is("resetodom")) {
+    robot.xe = 0;
+    robot.ye = 0;
+    robot.thetae = 0;
+    robot.rel_s = 0;
+    robot.rel_theta = 0;
+    out.println(">>> Odometry reset");
+  }
+  
+  out.print("> ");
 }
 
 // ============================================================================
-// MAIN LOOP
+// SETUP 
 // ============================================================================
 
-void loop() {
-    unsigned long currentTime = millis();
+void setup() 
+{
+  // Pins
+  pinMode(ENC1_A, INPUT_PULLUP);
+  pinMode(ENC1_B, INPUT_PULLUP);
+  pinMode(ENC2_A, INPUT_PULLUP);
+  pinMode(ENC2_B, INPUT_PULLUP);
+
+  pinMode(TEST_PIN, OUTPUT);
+
+  pinMode(MOTOR1_D0, OUTPUT);
+  pinMode(MOTOR1_D1, OUTPUT);
+  pinMode(MOTOR2_D2, OUTPUT);
+  pinMode(MOTOR2_D3, OUTPUT);
+  
+  // Garante motores parados no início
+  digitalWrite(MOTOR1_D0, LOW);
+  digitalWrite(MOTOR1_D1, LOW);
+  digitalWrite(MOTOR2_D2, LOW);
+  digitalWrite(MOTOR2_D3, LOW);
+
+  // Commands
+  serial_commands.init(process_command);
+
+  // Serial
+  Serial.begin(115200);
+  delay(2000);
+
+  Serial.println("\n========================================");
+  Serial.println(" LINE ROBOT");
+  Serial.println("========================================\n");
+
+  // Start timer interrupt (40kHz = 25µs period)
+  if (ITimer1.attachInterrupt(40000, timer_handler))
+    Serial.println("[OK] Timer interrupt started");
+  else
+    Serial.println("[ERROR] Timer failed");
+
+  // Initialize robot
+  robot.setLineSensor(&lineSensor);
+
+  // Sonar
+  HCSR04.begin(SONAR_TRIG, SONAR_ECHO);
+  Sonar1.setTerminal(&terminal);
+
+  // Follow mode
+  followMode.setSonar(&Sonar1);
+
+  // WiFi
+  if (terminal.begin(WIFI_SSID, WIFI_PASSWORD)) {
+    Serial.println("[OK] WiFi ready");
+    Serial.print("IP: ");
+    Serial.println(terminal.getIP());
+  }
+
+  // Timing 
+  interval = CONTROL_LOOP_MS;
+  robot.dt = interval / 1000.0f;
+  robot.PID1.dt = robot.dt;
+  robot.PID2.dt = robot.dt;
+
+  Serial.println("\n========================================");
+  Serial.println(" READY! Type 'help'");
+  Serial.println("========================================\n");
+  Serial.print("> ");
+}
+
+void loop() 
+{
+  unsigned long now = millis();
+  
+  // WiFi update
+  terminal.update();
+  
+  // Serial commands
+  if (Serial.available()) {
+    uint8_t b = Serial.read();
+    serial_commands.process_char(b);
+  }
+  
+  // WiFi commands
+  String wifi_cmd = terminal.readLine();
+  if (wifi_cmd.length() > 0) {
+    frame_data_t frame;
+    char cmd_buf[128];
+    wifi_cmd.toCharArray(cmd_buf, 128);
     
-    // ========================================================================
-    // UPDATE WIFI CONNECTION
-    // ========================================================================
-    terminal.update();
+    frame.command = cmd_buf;
+    frame.text = cmd_buf;
     
-    // ========================================================================
-    // CONTROL LOOP (20ms â‰ˆ 50 Hz)
-    // ========================================================================
-    if (currentTime - lastLoopTime >= CONTROL_LOOP_MS) {
-        lastLoopTime = currentTime;
-        robot.update();  // This now includes odometry update
+    char* space = strchr(cmd_buf, ' ');
+    if (space) {
+      *space = 0;
+      frame.text = space + 1;
+      frame.value = atof(frame.text);
+    } else {
+      frame.text = cmd_buf + strlen(cmd_buf);
+      frame.value = 0;
     }
     
-    // ========================================================================
-    // COMMAND HANDLING - SERIAL
-    // ========================================================================
-    if (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
-        
-        if (cmd.length() > 0) {
-            Serial.println(cmd);  // Echo command
-            processCommand(cmd);
-        }
+    process_command(frame);
+  }
+  
+  // Control loop 
+  if (now - last_cycle > interval) {
+    loop_micros = micros();
+    last_cycle += interval;
+
+    // Read sensors
+    read_encoders();
+    lineSensor.read();
+    
+    robot.enc1 = enc1;
+    robot.enc2 = enc2;
+    
+    // Odometry 
+    robot.odometry();
+    robot.battery_voltage = 7.4;
+
+    // Distance sensor
+    Sonar1.update();
+
+    // Follow mode
+    if(follow_mode_active) {
+      JunctionType junction = lineSensor.detectJunction();
+      followMode.update(junction, robot.rel_theta, robot.rel_s);
+      
+      if (followMode.shouldFollowLine()) {
+        out.println("[FOLLOW] Following line");
+        robot.control_mode = cm_line_follow;
+      }
+      else if (followMode.shouldSpiral()) {
+        out.println("[FOLLOW] Spiraling");
+        robot.setRobotVW(-0.05f, 0.0f);  // Spiral out
+        robot.control_mode = cm_pid;
+      }
+      else if (followMode.shouldStop()) {
+        out.println("[FOLLOW] Blocked! Stopping.");
+        robot.control_mode = cm_pwm;
+        robot.PWM_1 = 0;
+        robot.PWM_2 = 0;
+      }
+    }
+
+
+
+    // Maze solver
+    if (maze_mode_active) {
+      JunctionType junction = lineSensor.detectJunction();
+      Mazesolver.update(junction, robot.rel_theta, robot.rel_s);
+      
+      if (Mazesolver.shouldFollowLine()) {
+        robot.control_mode = cm_line_follow;
+      }
+      else if (Mazesolver.shouldGoForward()) {
+        robot.setRobotVW(0.1f, 0.0f);
+        robot.control_mode = cm_pid;
+      }
+      else if (Mazesolver.shouldTurnLeft()) {
+        robot.setGotoAngle(-TURN_90_ANGLE);
+      }
+      else if (Mazesolver.shouldTurnRight()) {
+        robot.setGotoAngle(TURN_90_ANGLE);
+      }
+      else if (Mazesolver.shouldTurnAround()) {
+        robot.setGotoAngle(TURN_180_ANGLE);
+      }
+      else if (Mazesolver.isFinished()) {
+        robot.control_mode = cm_pwm;
+        robot.PWM_1 = 0;
+        robot.PWM_2 = 0;
+        maze_mode_active = false;
+        out.println("\n>>> MAZE SOLVED!");
+      }
+    }
+
+    // Control
+    robot.accelerationLimit();        // Apply acceleration limits (v_req → v, w_req → w)
+    robot.setRobotVW(robot.v_req, robot.w_req);
+    robot.VWToMotorsVoltage();
+
+    // Motors
+    setMotorPWM(robot.PWM_1, MOTOR1_D0, MOTOR1_D1);
+    setMotorPWM(robot.PWM_2, MOTOR2_D2, MOTOR2_D3);
+    
+    // Streaming
+    if (sensor_stream) {
+      out.print("S: ");
+      out.print(lineSensor.getDigitalSensorValue(0) ? "B" : "W");
+      out.print("|");
+      out.print(lineSensor.getAnalogSensorValue(0));
+      out.print(",");
+      out.print(lineSensor.getAnalogSensorValue(1));
+      out.print(",");
+      out.print(lineSensor.getAnalogSensorValue(2));
+      out.print("|");
+      out.print(lineSensor.getDigitalSensorValue(1) ? "B" : "W");
+      out.print(" P:");
+      out.println(lineSensor.getPosition());
     }
     
-    // ========================================================================
-    // COMMAND HANDLING - WIFI
-    // ========================================================================
-    String wifiCmd = terminal.readLine();
-    if (wifiCmd.length() > 0) {
-        Serial.print("WiFi CMD: ");
-        Serial.println(wifiCmd);
-        processCommand(wifiCmd);
+    if (odom_stream) {
+      out.print("O: x=");
+      out.print(robot.xe, 2);
+      out.print(" y=");
+      out.print(robot.ye, 2);
+      out.print(" θ=");
+      out.print(robot.thetae * 180.0f / PI, 0);
+      out.print("° v=");
+      out.print(robot.ve, 2);
+      out.print(" w=");
+      out.println(robot.we, 1);
     }
-    
-    // ========================================================================
-    // STATUS OUTPUT (20ms)
-    // ========================================================================
-    if (currentTime - lastStatusTime >= 20) {
-        lastStatusTime = currentTime;
-        
-        RobotState currentState = robot.getState();
-        
-        if (currentState != STATE_IDLE) {
-            output.print("[");
-            switch(currentState) {
-                case STATE_IDLE: output.print("IDLE"); break;
-                case STATE_LINE_FOLLOW: output.print("FOLLOW"); break;
-                case STATE_SMALL_FORWARD: output.print("SMALL_FWD"); break;
-                case STATE_TURN_LEFT: output.print("LEFT"); break;
-                case STATE_TURN_RIGHT: output.print("RIGHT"); break;
-                case STATE_TURN_AROUND: output.print("U-TURN"); break;
-                case STATE_LOST: output.print("LOST"); break;
-                case STATE_FINISHED: output.print("FINISHED"); break;
-                default: output.print("?"); break;
-            }
-            output.print("] L=");
-            output.print(leftMotor.getSpeed());
-            output.print(" R=");
-            output.print(rightMotor.getSpeed());
-            
-            // Show relative odometry during turns and tests
-            if (currentState == STATE_TURN_LEFT || 
-                currentState == STATE_TURN_RIGHT || 
-                currentState == STATE_TURN_AROUND ||
-                currentState == STATE_SMALL_FORWARD ||
-                currentState == STATE_VELOCITY_CONTROL ||
-                currentState == STATE_GOTO_DISTANCE ||
-                currentState == STATE_GOTO_ANGLE) {
-                output.print(" [Î¸=");
-                output.print(odometry.getRelativeAngle() * 180.0f / PI, 0);
-                output.print("Â° d=");
-                output.print(odometry.getRelativeDistance(), 2);
-                output.print("m]");
-                
-                // For velocity control, show actual velocities
-                if (currentState == STATE_VELOCITY_CONTROL ||
-                    currentState == STATE_GOTO_DISTANCE ||
-                    currentState == STATE_GOTO_ANGLE) {
-                    output.print(" v=");
-                    output.print(odometry.getVelocity(), 2);
-                    output.print(" w=");
-                    output.print(odometry.getAngularVelocity(), 2);
-                }
-            }
-            
-            output.println();
-        }
-    }
-    
-    // ========================================================================
-    // SENSOR STREAM (200ms) 
-    // ========================================================================
-    if (sensorStreamEnabled && currentTime - lastSensorPrintTime >= 200) {
-        lastSensorPrintTime = currentTime;
-        
-        lineSensor.read();
-        
-        output.print("S:");
-        output.print(lineSensor.getDigitalSensorValue(0) ? "B" : "W");
-        output.print("|");
-        output.print(lineSensor.getAnalogSensorValue(0));
-        output.print(",");
-        output.print(lineSensor.getAnalogSensorValue(1));
-        output.print(",");
-        output.print(lineSensor.getAnalogSensorValue(2));
-        output.print("|");
-        output.print(lineSensor.getDigitalSensorValue(1) ? "B" : "W");
-        output.print("|P:");
-        output.println(lineSensor.getPosition());
-    }
-    
-    // ========================================================================
-    // ODOMETRY STREAM (200ms)
-    // ========================================================================
-    if (odomStreamEnabled && currentTime - lastSensorPrintTime >= 200) {
-        output.print("O: x=");
-        output.print(odometry.getX(), 2);
-        output.print(" y=");
-        output.print(odometry.getY(), 2);
-        output.print(" Î¸=");
-        output.print(odometry.getTheta() * 180.0f / PI, 0);
-        output.print("Â° | v=");
-        output.print(odometry.getVelocity(), 2);
-        output.print(" w=");
-        output.println(odometry.getAngularVelocity(), 1);
-    }
+  }
 }
